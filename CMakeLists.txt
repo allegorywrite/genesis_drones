@@ -24,6 +24,7 @@ ament_python_install_package(${PROJECT_NAME})
 # Install Python executables
 install(PROGRAMS
   ${PROJECT_NAME}/multi_drone_simulation.py
+  ${PROJECT_NAME}/keyboard_control_node.py
   scripts/multi_drone_simulation
   scripts/cb
   DESTINATION lib/${PROJECT_NAME}

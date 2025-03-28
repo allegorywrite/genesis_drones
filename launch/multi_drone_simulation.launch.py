@@ -54,20 +54,7 @@ def generate_launch_description():
         description='録画ファイルの出力先'
     )
     
-    # URDFファイルのパス
-    urdf_path = os.path.join(os.path.expanduser('~'), 'colcon_ws/src/genesis_drones/genesis_drones/urdf/crazyflie_camera.urdf.xacro')
-    
-    # URDFファイルが存在するか確認
-    if os.path.exists(urdf_path):
-        # URDFファイルの処理（仮想環境を使用）
-        urdf_process = ExecuteProcess(
-            cmd=['/bin/bash', '-c', f'. ~/genesis_venv/bin/activate && python3 -m genesis_ros.genesis_ros --urdf {urdf_path}'],
-            output='screen'
-        )
-    else:
-        # URDFファイルが存在しない場合は、処理をスキップ
-        urdf_process = None
-        print(f"Warning: URDF file not found at {urdf_path}")
+    # URDFファイルの処理は不要になりました
     
     # シミュレーションノード（ROS 2のrunコマンドを使用）
     simulation_node = Node(

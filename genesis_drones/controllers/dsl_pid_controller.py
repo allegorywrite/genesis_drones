@@ -59,14 +59,14 @@ class DSLPIDController(BaseController):
         self.D_COEFF_FOR = np.array([.2, .2, .5])
         
         # 速度制御用PID制御のゲイン
-        self.P_COEFF_VEL = np.array([.05, .05, 0.05])  # 線形速度 (z成分を強化)
-        self.I_COEFF_VEL = np.array([.1, .1, .5])   # z成分をさらに強化
-        self.D_COEFF_VEL = np.array([.002, .002, .005])   # 元のD_COEFF_FORと同じ値を使用
+        self.P_COEFF_VEL = np.array([.07, .07, .07])
+        self.I_COEFF_VEL = np.array([.05, .05, .05])
+        self.D_COEFF_VEL = np.array([.002, .002, .002])
         
         # 姿勢制御用PID制御のゲイン
-        self.P_COEFF_TOR = np.array([10000., 10000., 10000.])
+        self.P_COEFF_TOR = np.array([50000., 50000., 50000.])
         self.I_COEFF_TOR = np.array([.0, .0, 500.])
-        self.D_COEFF_TOR = np.array([100., 100.,100.])
+        self.D_COEFF_TOR = np.array([100, 100, 100])
         
         # PWM関連の定数
         self.PWM2RPM_SCALE = 0.2685

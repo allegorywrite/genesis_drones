@@ -42,6 +42,12 @@ class DroneFlightController:
         self.velocity_profile = velocity_profile
         self.time_elapsed = 0.0
         
+        # 速度持続ステップ関連のパラメータ
+        self.velocity_duration_steps = 0  # 持続ステップ数（0は無制限）
+        self.velocity_steps_counter = 0   # 経過ステップカウンター
+        self.default_velocity = np.zeros(3)  # デフォルト速度（停止時に使用）
+        self.default_angular_velocity = np.zeros(3)  # デフォルト角速度
+        
         # 速度プロファイル用パラメータ
         self.ramp_duration = 2.0  # ランプ時間 [s]
         self.sinusoidal_period = 5.0  # 正弦波周期 [s]
@@ -94,16 +100,22 @@ class DroneFlightController:
         self.log(f"Flying to point {target_point}")
         return True
     
-    def set_velocity_target(self, linear_vel: np.ndarray, angular_vel: np.ndarray) -> None:
+    def set_velocity_target(self, linear_vel: np.ndarray, angular_vel: np.ndarray, duration_steps: int = 0) -> None:
         """
         目標速度を設定（速度制御モード用）
         
         Args:
             linear_vel (np.ndarray): 目標線形速度 [m/s]
             angular_vel (np.ndarray): 目標角速度 [rad/s]
+            duration_steps (int): 速度を維持するステップ数（0は無制限）
         """
         self.target_velocity = linear_vel
         self.target_angular_velocity = angular_vel
+        self.velocity_duration_steps = duration_steps
+        self.velocity_steps_counter = 0  # カウンターをリセット
+        
+        if duration_steps > 0 and self.logger:
+            self.logger.info(f"Setting velocity for {duration_steps} steps")
     
     def _get_velocity_profile(self, dt: float) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -163,6 +175,19 @@ class DroneFlightController:
             return False, False
             
         if self.velocity_control:
+            # 持続ステップのカウント
+            if self.velocity_duration_steps > 0:
+                self.velocity_steps_counter += 1
+                
+                # 指定ステップ数に達したら速度をリセット
+                if self.velocity_steps_counter >= self.velocity_duration_steps:
+                    self.target_velocity = self.default_velocity
+                    self.target_angular_velocity = self.default_angular_velocity
+                    self.velocity_duration_steps = 0
+                    self.velocity_steps_counter = 0
+                    if self.logger:
+                        self.logger.info("Velocity duration reached, resetting to default velocity")
+            
             # 速度制御モード
             linear_vel, angular_vel = self._get_velocity_profile(self.controller.dt)
             
@@ -176,6 +201,8 @@ class DroneFlightController:
                 print(f"\n[DroneFlightController] drone_pos: {drone_pos}")
                 print(f"[DroneFlightController] linear_vel: {linear_vel}")
                 print(f"[DroneFlightController] angular_vel: {angular_vel}")
+                if self.velocity_duration_steps > 0:
+                    print(f"[DroneFlightController] remaining steps: {self.velocity_duration_steps - self.velocity_steps_counter}")
             
             rpms = self.controller.update(linear_vel, angular_vel, vel_target=True)
             self.controller.set_propellers_rpm(rpms)
