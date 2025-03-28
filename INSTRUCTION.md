@@ -1,3 +1,9 @@
-genesis_drones/
-・dsl_pid_controller.pyを実行すると，ドローンが上方に吹き飛びます
-・改めて/home/initial/colcon_ws/src/genesis_drones/gym-pybullet-drones/gym_pybullet_drones/control/DSLPIDControl.pyを参照しdsl_pid_controller.pyをデバッグ修正してコントローラを実装してください
+genesis_drones/controllers/flight_controller.py
+の速度制御を使って，十字キーで制御できるrosコードを作ってください．
+速度(並進と回転)のros2 msgを使って
+十字キー入力を速度msgでpublishするノードと
+それをsubscribeしてドローン制御するノードを作る必要があります．
+今後の拡張性を考慮して，
+
+
+あなたは出力文字数が一定値を超えると途切れるようになっています．長い文章を出力する場合は，適宜区切り，write_in_fileではなくreplase_in_fileを用いてファイルを更新してください．

@@ -70,6 +70,16 @@ class BaseController(ABC):
             torch.Tensor: ドローンの姿勢（クォータニオン）
         """
         return self.drone.get_quat()
+
+    def get_drone_ang_vel(self) -> torch.Tensor:
+        """
+        ドローンの角速度を取得
+        
+        Returns:
+            torch.Tensor: ドローンの角速度
+        """
+        # degree to radians
+        return self.drone.get_ang()
     
     def set_propellers_rpm(self, rpms: List[float]) -> None:
         """

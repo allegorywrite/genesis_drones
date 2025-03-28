@@ -25,6 +25,7 @@ try:
     from genesis_drones.controllers.pid_controller import DronePIDController
     from genesis_drones.controllers.ctbr_controller import CTBRController
     from genesis_drones.controllers.dsl_pid_controller import DSLPIDController
+    from genesis_drones.controllers.velocity_controller import VelocityController
     from genesis_drones.controllers.hybrid_controller import HybridController
     from genesis_drones.controllers.flight_controller import DroneFlightController
     from genesis_drones.utils.simulation_utils import (
@@ -43,6 +44,7 @@ except ImportError:
     from .controllers.pid_controller import DronePIDController
     from .controllers.ctbr_controller import CTBRController
     from .controllers.dsl_pid_controller import DSLPIDController
+    from .controllers.velocity_controller import VelocityController
     from .controllers.flight_controller import DroneFlightController
     from .utils.simulation_utils import (
         process_xacro, parse_route_string, parse_multi_drone_routes, cleanup_temp_files,
@@ -88,10 +90,14 @@ class MultiDroneSimulation(Node):
         self.declare_parameter('record_camera', record_camera)
         self.declare_parameter('render_camera', render_camera)
         self.declare_parameter('output_file', output_file)
-        self.declare_parameter('dt', 0.033)  # シミュレーションの時間ステップ
+        self.declare_parameter('dt', 0.01)  # シミュレーションの時間ステップ
         self.declare_parameter('route', '')  # 単一ドローンの飛行ルート
         self.declare_parameter('routes', '')  # 複数ドローンの飛行ルート
         self.declare_parameter('drone_id', 0)  # 飛行ルートを適用するドローンのID
+        self.declare_parameter('velocity_control', False)  # 速度制御モード
+        self.declare_parameter('target_velocity', '0.0,0.0,0.0')  # 目標速度 [m/s]
+        self.declare_parameter('target_angular_velocity', '0.0,0.0,0.0')  # 目標角速度 [rad/s]
+        self.declare_parameter('velocity_profile', 'constant')  # 速度プロファイル
         
         # パラメータの取得
         num_drones = self.get_parameter('num_drones').value
@@ -100,6 +106,10 @@ class MultiDroneSimulation(Node):
         self.render_camera = self.get_parameter('render_camera').value
         self.output_file = self.get_parameter('output_file').value
         self.dt = self.get_parameter('dt').value
+        self.velocity_control = self.get_parameter('velocity_control').value
+        self.target_velocity = self.get_parameter('target_velocity').value
+        self.target_angular_velocity = self.get_parameter('target_angular_velocity').value
+        self.velocity_profile = self.get_parameter('velocity_profile').value
         
         # パラメータの型変換（文字列からbool型への変換）
         if isinstance(self.show_camera, str):
@@ -108,9 +118,21 @@ class MultiDroneSimulation(Node):
             self.record_camera = self.record_camera.lower() == 'true'
         if isinstance(self.render_camera, str):
             self.render_camera = self.render_camera.lower() == 'true'
+        if isinstance(self.velocity_control, str):
+            self.velocity_control = self.velocity_control.lower() == 'true'
+            
+        # 速度パラメータの変換
+        try:
+            self.target_velocity = np.array([float(x) for x in self.target_velocity.split(',')])
+            self.target_angular_velocity = np.array([float(x) for x in self.target_angular_velocity.split(',')])
+        except Exception as e:
+            self.get_logger().error(f"Error parsing velocity parameters: {e}")
+            self.target_velocity = np.array([0.0, 0.0, 0.0])
+            self.target_angular_velocity = np.array([0.0, 0.0, 0.0])
             
         # カメラレンダリングの設定をログに出力
         self.get_logger().info(f"Camera rendering: {'enabled' if self.render_camera else 'disabled'}")
+        self.get_logger().info(f"Velocity control: {'enabled' if self.velocity_control else 'disabled'}")
         
         # Genesisシーンの初期化
         self.scene = initialize_genesis_scene(dt=self.dt)
@@ -124,7 +146,6 @@ class MultiDroneSimulation(Node):
         # ドローンの初期化
         self.drones = []
         self.cameras = []
-        self.pid_controllers = []  # PIDコントローラのリスト
         self.flight_controllers = []  # 飛行コントローラのリスト
         self.temp_files = []  # 一時ファイルのリスト
         
@@ -144,24 +165,22 @@ class MultiDroneSimulation(Node):
             drone = add_drone_to_scene(self.scene, position=drone_position)
             self.drones.append(drone)
             
-            # PIDコントローラの初期化
-            # pid_controller = DronePIDController(
-            #     drone=drone,
-            #     dt=self.dt
-            # )
-            # self.pid_controllers.append(pid_controller)
-
-            ctbr_controller = DSLPIDController(
+            # コントローラの初期化（速度制御モードかどうかで切り替え）
+            # 速度制御モードでもDSLPIDControllerを使用するように変更
+            controller = DSLPIDController(
                 drone=drone,
                 dt=self.dt
             )
-            # self.pid_controllers.append(ctbr_controller)
             
             # 飛行コントローラの初期化
             flight_controller = DroneFlightController(
                 drone=drone,
-                controller=ctbr_controller,
-                logger=self.get_logger()
+                controller=controller,
+                logger=self.get_logger(),
+                velocity_control=self.velocity_control,
+                target_velocity=self.target_velocity,
+                target_angular_velocity=self.target_angular_velocity,
+                velocity_profile=self.velocity_profile
             )
             self.flight_controllers.append(flight_controller)
             
@@ -243,7 +262,7 @@ class MultiDroneSimulation(Node):
                     
                     # ルート線を追加（オプション）
                     for drone_id, points in drone_routes:
-                        # 最初のウェイポイントにアクティブマーカーを作成
+                        # 最初のウェイポイントにアクティブマーカーを作ン
                         if points:
                             self.waypoint_manager.create_active_marker(drone_id, points[0], size=0.15)
             except Exception as e:
@@ -510,13 +529,17 @@ def main():
     parser.add_argument('--record', action='store_true', help='カメラ映像を録画する')
     parser.add_argument('--no-render-camera', action='store_false', dest='render_camera', help='カメラのレンダリングを行わない（処理速度向上）')
     parser.add_argument('--output', type=str, default="fly_route_camera.mp4", help='録画ファイルの出力先')
+    parser.add_argument('--velocity-control', action='store_true', help='速度制御モードを有効にする')
+    parser.add_argument('--target-velocity', type=str, default="0.0,0.0,0.0", help='目標速度 (x,y,z) [m/s]')
+    parser.add_argument('--target-angular-velocity', type=str, default="0.0,0.0,0.0", help='目標角速度 (roll,pitch,yaw) [rad/s]')
+    parser.add_argument('--velocity-profile', type=str, default="constant", help='速度プロファイル (constant, ramp, sinusoidal)')
     args = parser.parse_args()
     
     # ROS 2の初期化
     rclpy.init()
     
     # コマンドライン引数の値をログに出力
-    print(f"Command line args: render_camera={args.render_camera}")
+    print(f"Command line args: render_camera={args.render_camera}, velocity_control={args.velocity_control}")
     
     # シミュレーションの開始
     simulation = MultiDroneSimulation(
@@ -534,6 +557,14 @@ def main():
         simulation.set_parameter(rclpy.parameter.Parameter('routes', value=args.routes))
     if args.drone_id != 0:  # デフォルト値でない場合のみ設定
         simulation.set_parameter(rclpy.parameter.Parameter('drone_id', value=args.drone_id))
+    if args.velocity_control:
+        simulation.set_parameter(rclpy.parameter.Parameter('velocity_control', value=True))
+    if args.target_velocity != "0.0,0.0,0.0":
+        simulation.set_parameter(rclpy.parameter.Parameter('target_velocity', value=args.target_velocity))
+    if args.target_angular_velocity != "0.0,0.0,0.0":
+        simulation.set_parameter(rclpy.parameter.Parameter('target_angular_velocity', value=args.target_angular_velocity))
+    if args.velocity_profile != "constant":
+        simulation.set_parameter(rclpy.parameter.Parameter('velocity_profile', value=args.velocity_profile))
     
     try:
         # ROS 2のスピン
@@ -541,7 +572,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # 終了処理
+        # 終た処理
         simulation.shutdown()
         simulation.destroy_node()
         rclpy.shutdown()
