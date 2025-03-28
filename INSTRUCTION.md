@@ -1,0 +1,3 @@
+genesis_drones/
+・dsl_pid_controller.pyを実行すると，ドローンが上方に吹き飛びます
+・改めて/home/initial/colcon_ws/src/genesis_drones/gym-pybullet-drones/gym_pybullet_drones/control/DSLPIDControl.pyを参照しdsl_pid_controller.pyをデバッグ修正してコントローラを実装してください

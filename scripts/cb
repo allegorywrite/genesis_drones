@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# colcon_wsディレクトリでビルドを実行するためのスクリプト
+# どの階層からでも実行可能
+
+# colcon_wsディレクトリのパス
+COLCON_WS_DIR="/home/initial/colcon_ws"
+
+# 現在のディレクトリを保存
+CURRENT_DIR=$(pwd)
+
+# ビルドオプションの設定
+BUILD_OPTS="--symlink-install"
+
+# 引数がある場合は、それをビルドオプションに追加
+if [ $# -gt 0 ]; then
+    BUILD_OPTS="$BUILD_OPTS $@"
+fi
+
+# colcon_wsディレクトリに移動せずにビルドを実行
+echo "Building in $COLCON_WS_DIR with options: $BUILD_OPTS"
+(cd $COLCON_WS_DIR && colcon build $BUILD_OPTS)
+
+# ビルド後にセットアップファイルをソース
+echo "Sourcing setup files..."
+source $COLCON_WS_DIR/install/setup.bash
+
+echo "Build completed. You can now run ROS2 commands from any directory."

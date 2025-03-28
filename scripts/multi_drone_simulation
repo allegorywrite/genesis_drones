@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+
+import sys
+import rclpy
+from genesis_drones.multi_drone_simulation import MultiDroneSimulation
+
+def main(args=None):
+    rclpy.init(args=args)
+    
+    simulation = MultiDroneSimulation(
+        num_drones=20,
+        show_camera=False,
+        record_camera=False,
+        render_camera=False,
+        output_file="fly_route_camera.mp4"
+    )
+    
+    try:
+        rclpy.spin(simulation)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        simulation.shutdown()
+        simulation.destroy_node()
+        rclpy.shutdown()
+
+if __name__ == '__main__':
+    main(sys.argv)
