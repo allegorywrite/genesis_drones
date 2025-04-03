@@ -65,7 +65,7 @@ class DSLPIDController(BaseController):
         
         # 姿勢制御用PID制御のゲイン
         self.P_COEFF_TOR = np.array([50000., 50000., 50000.])
-        self.I_COEFF_TOR = np.array([.0, .0, 500.])
+        self.I_COEFF_TOR = np.array([500., 500., 500.])
         self.D_COEFF_TOR = np.array([100, 100, 100])
         
         # PWM関連の定数

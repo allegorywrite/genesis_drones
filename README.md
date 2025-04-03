@@ -49,6 +49,11 @@ ros2 run genesis_drones multi_drone_simulation --ros-args -p velocity_control:=t
 ros2 run genesis_drones keyboard_control_node.py --ros-args -p linear_speed:=0.5 -p drone_id:=0
 ```
 
+#### PIDゲインの最適化
+```bash
+python3 src/genesis_drones/scripts/velocity_tracking_plot.py --steps 100 --optimize --output
+```
+
 #### キーボード操作方法
 
 - **矢印キー上**：前進（+X方向）

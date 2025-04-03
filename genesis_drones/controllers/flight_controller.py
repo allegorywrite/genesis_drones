@@ -196,13 +196,13 @@ class DroneFlightController:
                 self.log_counter = 0
             self.log_counter += 1
             
-            if self.log_counter % 30 == 0:
-                drone_pos = self.drone.get_pos().cpu().numpy()
-                print(f"\n[DroneFlightController] drone_pos: {drone_pos}")
-                print(f"[DroneFlightController] linear_vel: {linear_vel}")
-                print(f"[DroneFlightController] angular_vel: {angular_vel}")
-                if self.velocity_duration_steps > 0:
-                    print(f"[DroneFlightController] remaining steps: {self.velocity_duration_steps - self.velocity_steps_counter}")
+            # if self.log_counter % 30 == 0:
+            #     drone_pos = self.drone.get_pos().cpu().numpy()
+            #     print(f"\n[DroneFlightController] drone_pos: {drone_pos}")
+            #     print(f"[DroneFlightController] linear_vel: {linear_vel}")
+            #     print(f"[DroneFlightController] angular_vel: {angular_vel}")
+            #     if self.velocity_duration_steps > 0:
+            #         print(f"[DroneFlightController] remaining steps: {self.velocity_duration_steps - self.velocity_steps_counter}")
             
             rpms = self.controller.update(linear_vel, angular_vel, vel_target=True)
             self.controller.set_propellers_rpm(rpms)
@@ -262,3 +262,11 @@ class DroneFlightController:
         # ホバリング状態に設定
         if hasattr(self.controller, 'hover'):
             self.controller.hover()
+
+    def reset(self):
+        """コントローラをリセットする"""
+        self.is_flying = False
+        self.current_target = None
+        self.time_elapsed = 0.0
+        if hasattr(self.controller, 'reset'):
+            self.controller.reset()
