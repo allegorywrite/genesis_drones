@@ -67,10 +67,16 @@ def parse_arguments():
                         help='最大試行回数（デフォルト: 1000）')
     parser.add_argument('--use-cbf', action='store_true',
                         help='Control Barrier Functionを使用するかどうか')
+    parser.add_argument('--use-new-cbf', action='store_true',
+                        help='新しいCBF実装を使用するかどうか')
     parser.add_argument('--q', type=float, default=0.5,
                         help='確率の閾値（デフォルト: 0.5）')
     parser.add_argument('--gamma', type=float, default=0.1,
                         help='CBFのゲイン（デフォルト: 0.1）')
+    parser.add_argument('--c1', type=float, default=0.5,
+                        help='CBF制約の重み1（デフォルト: 0.5）')
+    parser.add_argument('--c2', type=float, default=0.5,
+                        help='CBF制約の重み2（デフォルト: 0.5）')
     return parser.parse_args()
 
 def main():
@@ -134,9 +140,24 @@ def main():
         
         # Control Barrier Functionを使用する場合
         if args.use_cbf:
-            # 目標位置追従のための安全な制御入力を生成
-            xi1, xi2 = generate_position_tracking_control_inputs(
-                sim, p1_des, p2_des, K_p=1.0, q=args.q, gamma=args.gamma)
+            # 目標位置追従のための制御入力を計算
+            xi1_des = compute_position_tracking_control(sim.drones[0], p1_des, K_p=1.0)
+            xi2_des = compute_position_tracking_control(sim.drones[1], p2_des, K_p=1.0)
+            
+            # 新しいCBF実装を使用するかどうか
+            if args.use_new_cbf:
+                # 新しいCBF実装を使用
+                from cbf_se3 import solve_multi_drone_cbf_qp
+                xi1, xi2 = solve_multi_drone_cbf_qp(
+                    sim.drones[0], sim.drones[1], sim.feature_points, 
+                    xi1_des, xi2_des, q=args.q, gamma0=args.gamma, 
+                    c1=args.c1, c2=args.c2)
+                
+                print(f"新しいCBF実装を使用しています")
+            else:
+                # 既存のCBF実装を使用
+                xi1, xi2 = generate_safe_control_inputs(
+                    sim, xi1_des, xi2_des, q=args.q, gamma=args.gamma, use_new_cbf=False)
             
             # 現在の安全集合の値と位置誤差を表示（10フレームごと）
             if frame % 10 == 0:

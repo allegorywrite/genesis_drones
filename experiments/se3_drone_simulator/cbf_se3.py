@@ -3,8 +3,13 @@ SE(3)上の制約付き最適化問題（Control Barrier Function）を実装す
 """
 import numpy as np
 from scipy import optimize
+import cvxopt
+import cvxopt.solvers
 from se3 import SE3, skew
 from drone import Drone, FeaturePoint
+
+# cvxoptのソルバーの設定（出力を抑制）
+cvxopt.solvers.options['show_progress'] = False
 
 
 def compute_barrier_function(drone1, drone2, feature_points, q=0.5):
@@ -444,7 +449,370 @@ def generate_position_tracking_control_inputs(simulator, p1_des, p2_des, K_p=1.0
     return xi1_safe, xi2_safe
 
 
-def generate_safe_control_inputs(simulator, xi1_des, xi2_des, q=0.5, gamma=0.1):
+def compute_cbf_constraint_coefficients(drone1, drone2, feature_points, q=0.5, d=1.0):
+    """
+    CBF制約の係数を計算
+    
+    Parameters:
+    -----------
+    drone1 : Drone
+        1つ目のドローン
+    drone2 : Drone
+        2つ目のドローン
+    feature_points : list of FeaturePoint
+        環境内の特徴点のリスト
+    q : float, optional
+        確率の閾値（デフォルトは0.5）
+    d : float, optional
+        距離パラメータ（デフォルトは1.0）
+        
+    Returns:
+    --------
+    alpha_omega : ndarray, shape (3,)
+        ドローン1の角速度に関する制約係数
+    beta_omega : ndarray, shape (3,)
+        ドローン2の角速度に関する制約係数
+    alpha_v : ndarray, shape (3,)
+        ドローン1の速度に関する制約係数
+    beta_v : ndarray, shape (3,)
+        ドローン2の速度に関する制約係数
+    gamma : float
+        CBF制約の右辺値
+    """
+    # カメラの方向ベクトル
+    e_c = drone1.camera_direction  # 両方のドローンで同じと仮定
+    
+    # 視野角の余弦
+    cos_psi_F = np.cos(drone1.fov_angle)
+    
+    # 各特徴点についての確率を計算
+    probs = []
+    visible_features = []
+    
+    for fp in feature_points:
+        # 両方のドローンから見える特徴点のみを考慮
+        if drone1.is_point_visible(fp.position) and drone2.is_point_visible(fp.position):
+            prob = drone1.calculate_cofov_probability(drone2, fp.position)
+            probs.append(prob)
+            visible_features.append(fp)
+    
+    # 共有視野内の特徴点がない場合
+    if not visible_features:
+        return np.zeros(3), np.zeros(3), np.zeros(3), np.zeros(3), -q
+    
+    # 安全集合の値（gamma）の計算
+    prod_term = 1.0
+    for prob in probs:
+        prod_term *= (1.0 - prob)
+    
+    gamma_val = 1.0 - q - prod_term
+    
+    # 制約係数の初期化
+    alpha_omega = np.zeros(3)
+    beta_omega = np.zeros(3)
+    alpha_v = np.zeros(3)
+    beta_v = np.zeros(3)
+    
+    # 各特徴点について制約係数を計算
+    for i, fp in enumerate(visible_features):
+        # 特徴点の位置
+        q_l = fp.position
+        
+        # βベクトル（特徴点の方向を表す単位ベクトル）
+        beta_l_i = drone1.get_beta_vector(q_l)
+        beta_l_j = drone2.get_beta_vector(q_l)
+        
+        # 観測確率
+        P_i_l = drone1.get_observation_probability(q_l)
+        P_j_l = drone2.get_observation_probability(q_l)
+        
+        # 他の特徴点の確率の積
+        prod_other = 1.0
+        for j, prob in enumerate(probs):
+            if j != i:
+                prod_other *= (1.0 - prob)
+        
+        # P_βの計算（投影行列）
+        P_beta_l_i = np.eye(3) - np.outer(beta_l_i, beta_l_i)
+        P_beta_l_j = np.eye(3) - np.outer(beta_l_j, beta_l_j)
+        
+        # 係数の計算
+        # alpha_omega
+        alpha_omega_term = prod_other * P_j_l * beta_l_i.T @ drone1.T.R @ skew(e_c) / (1.0 - cos_psi_F)
+        alpha_omega += alpha_omega_term
+        
+        # beta_omega
+        beta_omega_term = prod_other * P_i_l * beta_l_j.T @ drone2.T.R @ skew(e_c) / (1.0 - cos_psi_F)
+        beta_omega += beta_omega_term
+        
+        # alpha_v
+        alpha_v_term = prod_other * P_j_l * e_c.T @ drone1.T.R.T @ P_beta_l_i / ((1.0 - cos_psi_F) * d)
+        alpha_v += alpha_v_term
+        
+        # beta_v
+        beta_v_term = prod_other * P_i_l * e_c.T @ drone2.T.R.T @ P_beta_l_j / ((1.0 - cos_psi_F) * d)
+        beta_v += beta_v_term
+    
+    return alpha_omega, beta_omega, alpha_v, beta_v, gamma_val
+
+
+def compute_objective_coefficients(drone, p_des, Q1=None, Q2=None, h=0.01):
+    """
+    目的関数の係数を計算
+    
+    Parameters:
+    -----------
+    drone : Drone
+        ドローン
+    p_des : array_like, shape (3,)
+        目標位置
+    Q1 : array_like, optional
+        位置誤差の重み行列（デフォルトは単位行列）
+    Q2 : array_like, optional
+        制御入力の重み行列（デフォルトは単位行列）
+    h : float, optional
+        時間ステップ（デフォルトは0.01）
+        
+    Returns:
+    --------
+    H : ndarray, shape (6, 6)
+        目的関数のヘッセ行列
+    f : ndarray, shape (6,)
+        目的関数の一次項
+    """
+    # デフォルトの重み行列
+    if Q1 is None:
+        Q1 = np.eye(3)
+    if Q2 is None:
+        Q2 = np.eye(6)
+    
+    # 位置誤差
+    e_i = p_des - drone.T.p - h * drone.T.R @ np.zeros(3)  # 現在の速度を0と仮定
+    
+    # ヘッセ行列の計算
+    # H = 2 * [Q2_omega, Q2_omega_v; Q2_omega_v^T, Q2_v + h^2 * R_i^T * Q1 * R_i]
+    H = np.zeros((6, 6))
+    
+    # 角速度部分
+    H[:3, :3] = 2 * Q2[:3, :3]
+    
+    # 角速度と速度の相互項
+    H[:3, 3:] = 2 * Q2[:3, 3:]
+    H[3:, :3] = 2 * Q2[3:, :3]
+    
+    # 速度部分
+    H[3:, 3:] = 2 * (Q2[3:, 3:] + h**2 * drone.T.R.T @ Q1 @ drone.T.R)
+    
+    # 一次項の計算
+    # f = [0; -2h * R_i^T * Q1 * e_i]
+    f = np.zeros(6)
+    f[3:] = -2 * h * drone.T.R.T @ Q1 @ e_i
+    
+    return H, f
+
+
+def solve_single_drone_qp(drone, p_des, xi_des=None, use_cbf=True, Q1=None, Q2=None, h=0.01, cbf_constraints=None):
+    """
+    単一ドローンのQP問題を解く
+    
+    Parameters:
+    -----------
+    drone : Drone
+        ドローン
+    p_des : array_like, shape (3,)
+        目標位置
+    xi_des : array_like, shape (6,), optional
+        目標制御入力（指定しない場合は位置追従制御から計算）
+    use_cbf : bool, optional
+        CBF制約を使用するかどうか（デフォルトはTrue）
+    Q1 : array_like, optional
+        位置誤差の重み行列
+    Q2 : array_like, optional
+        制御入力の重み行列
+    h : float, optional
+        時間ステップ
+    cbf_constraints : tuple, optional
+        CBF制約の係数 (G, h)
+        G: 制約行列
+        h: 制約の右辺
+        
+    Returns:
+    --------
+    xi_safe : ndarray, shape (6,)
+        安全な制御入力
+    """
+    # 目標制御入力が指定されていない場合は位置追従制御から計算
+    if xi_des is None:
+        xi_des = compute_position_tracking_control(drone, p_des)
+    
+    # 目的関数の係数を計算
+    H, f = compute_objective_coefficients(drone, p_des, Q1, Q2, h)
+    
+    # 目標入力からの偏差を最小化する目的関数
+    # J = 1/2 * (xi - xi_des)^T * (xi - xi_des)
+    # = 1/2 * xi^T * xi - xi_des^T * xi + 1/2 * xi_des^T * xi_des
+    # = 1/2 * xi^T * I * xi - xi_des^T * xi + const
+    # cvxoptの形式: 1/2 * x^T * P * x + q^T * x
+    P = cvxopt.matrix(np.eye(6))
+    q = cvxopt.matrix(-xi_des)
+    
+    # 制約条件がない場合は解析解を使用
+    if not use_cbf or cbf_constraints is None:
+        # 解析解: xi = xi_des
+        return xi_des
+    
+    # CBF制約を使用する場合は、制約条件を設定
+    G, h_val = cbf_constraints
+    G_cvx = cvxopt.matrix(G)
+    h_cvx = cvxopt.matrix(h_val)
+    
+    # QP問題を解く
+    try:
+        sol = cvxopt.solvers.qp(P, q, G_cvx, h_cvx)
+        
+        # 解が見つかった場合
+        if sol['status'] == 'optimal':
+            xi_safe = np.array(sol['x']).flatten()
+            return xi_safe
+        else:
+            print(f"警告: QP問題の解決に失敗しました: {sol['status']}")
+            return xi_des
+    except Exception as e:
+        print(f"警告: QP問題の解決中にエラーが発生しました: {e}")
+        return xi_des
+
+
+def compute_single_drone_cbf_constraints(drone, obstacles, safety_distance=0.5, gamma=0.1):
+    """
+    単一ドローンのCBF制約を計算
+    
+    Parameters:
+    -----------
+    drone : Drone
+        ドローン
+    obstacles : list of ndarray
+        障害物の位置のリスト
+    safety_distance : float, optional
+        安全距離（デフォルトは0.5）
+    gamma : float, optional
+        CBFのゲイン（デフォルトは0.1）
+        
+    Returns:
+    --------
+    G : ndarray
+        制約行列
+    h : ndarray
+        制約の右辺
+    """
+    if not obstacles:
+        # 障害物がない場合は制約なし
+        return None
+    
+    num_obstacles = len(obstacles)
+    
+    # 制約行列と右辺の初期化
+    G = np.zeros((num_obstacles, 6))
+    h = np.zeros(num_obstacles)
+    
+    for i, obstacle_pos in enumerate(obstacles):
+        # ドローンと障害物の距離
+        diff = drone.T.p - obstacle_pos
+        dist = np.linalg.norm(diff)
+        
+        # 安全集合: B(x) = ||p - p_obs||^2 - d_safe^2
+        b = dist**2 - safety_distance**2
+        
+        # 勾配: ∇B(x) = 2 * (p - p_obs)
+        grad_b = 2 * diff
+        
+        # CBF制約: ∇B(x)^T * v >= -γ * B(x)
+        # ボディフレームに変換
+        grad_b_body = drone.T.R.T @ grad_b
+        
+        # 制約行列: [0, grad_b_body]
+        G[i, 3:] = -grad_b_body  # 負の符号は制約の向きによる
+        
+        # 制約の右辺: -γ * B(x)
+        h[i] = gamma * b
+    
+    return G, h
+
+
+def solve_multi_drone_cbf_qp(drone1, drone2, feature_points, xi1_des, xi2_des, q=0.5, gamma0=0.1, c1=0.5, c2=0.5):
+    """
+    複数ドローンのCBF制約付きQP問題を解く（ccbf.mdの数式に基づく実装）
+    
+    Parameters:
+    -----------
+    drone1 : Drone
+        1つ目のドローン
+    drone2 : Drone
+        2つ目のドローン
+    feature_points : list of FeaturePoint
+        環境内の特徴点のリスト
+    xi1_des : array_like, shape (6,)
+        ドローン1の目標速度入力 [omega, v]
+    xi2_des : array_like, shape (6,)
+        ドローン2の目標速度入力 [omega, v]
+    q : float, optional
+        確率の閾値（デフォルトは0.5）
+    gamma0 : float, optional
+        CBFのゲイン（デフォルトは0.1）
+    c1, c2 : float, optional
+        CBF制約の重み（デフォルトはそれぞれ0.5）
+        
+    Returns:
+    --------
+    xi1_safe : ndarray, shape (6,)
+        ドローン1の安全な速度入力
+    xi2_safe : ndarray, shape (6,)
+        ドローン2の安全な速度入力
+    """
+    # CBF制約の係数を計算
+    alpha_omega, beta_omega, alpha_v, beta_v, gamma_val = compute_cbf_constraint_coefficients(
+        drone1, drone2, feature_points, q)
+    
+    # 安全集合の値が既に負の場合は、安全な入力を見つけるのが難しいため、
+    # 目標入力をそのまま返す
+    if gamma_val < 0:
+        print(f"警告: 安全集合の値が負です (gamma={gamma_val:.4f})")
+        return xi1_des, xi2_des
+    
+    # 目的関数の係数
+    # 簡単のため、目標入力からの偏差を最小化する二次形式を使用
+    P = cvxopt.matrix(np.eye(12))
+    q = cvxopt.matrix(np.concatenate([-xi1_des, -xi2_des]))
+    
+    # 制約行列の構築
+    # [alpha_omega, 0, beta_omega, 0; 0, alpha_v, 0, beta_v] * [omega1; v1; omega2; v2] <= [c1; c2] * gamma0 * gamma_val
+    A = np.zeros((2, 12))
+    A[0, :3] = alpha_omega
+    A[0, 6:9] = beta_omega
+    A[1, 3:6] = alpha_v
+    A[1, 9:] = beta_v
+    
+    # 制約の右辺
+    b = np.array([c1, c2]) * gamma0 * gamma_val
+    
+    # cvxoptの形式に変換
+    G = cvxopt.matrix(-A)
+    h = cvxopt.matrix(b)
+    
+    # QP問題を解く
+    sol = cvxopt.solvers.qp(P, q, G, h)
+    
+    # 解が見つかった場合
+    if sol['status'] == 'optimal':
+        x_opt = np.array(sol['x']).flatten()
+        xi1_safe = x_opt[:6]
+        xi2_safe = x_opt[6:]
+        return xi1_safe, xi2_safe
+    else:
+        print(f"警告: QP問題の解決に失敗しました: {sol['status']}")
+        return xi1_des, xi2_des
+
+
+def generate_safe_control_inputs(simulator, xi1_des, xi2_des, q=0.5, gamma=0.1, use_new_cbf=True):
     """
     CBFに基づいて安全な制御入力を生成
     
@@ -460,6 +828,8 @@ def generate_safe_control_inputs(simulator, xi1_des, xi2_des, q=0.5, gamma=0.1):
         確率の閾値（デフォルトは0.5）
     gamma : float, optional
         CBFのゲイン（デフォルトは0.1）
+    use_new_cbf : bool, optional
+        新しいCBF実装を使用するかどうか（デフォルトはTrue）
         
     Returns:
     --------
@@ -476,7 +846,13 @@ def generate_safe_control_inputs(simulator, xi1_des, xi2_des, q=0.5, gamma=0.1):
     drone2 = simulator.drones[1]
     
     # CBFに基づく二次計画問題を解く
-    xi1_safe, xi2_safe = solve_cbf_qp(drone1, drone2, simulator.feature_points, 
-                                      xi1_des, xi2_des, q, gamma)
+    if use_new_cbf:
+        # 新しいCBF実装を使用
+        xi1_safe, xi2_safe = solve_multi_drone_cbf_qp(
+            drone1, drone2, simulator.feature_points, xi1_des, xi2_des, q, gamma)
+    else:
+        # 既存のCBF実装を使用
+        xi1_safe, xi2_safe = solve_cbf_qp(
+            drone1, drone2, simulator.feature_points, xi1_des, xi2_des, q, gamma)
     
     return xi1_safe, xi2_safe

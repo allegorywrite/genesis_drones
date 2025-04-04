@@ -170,6 +170,17 @@
   },
   "active": "f58ce7dc446695ca",
   "lastOpenFiles": [
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt-1.3.2.dist-info/REQUESTED",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt-1.3.2.dist-info/INSTALLER",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/solvers.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/printing.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/msk.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/modeling.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/misc.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/info.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/cvxprog.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/coneprog.cpython-312.pyc",
+    "se3_drone_simulator/venv/lib/python3.12/site-packages/cvxopt/__pycache__/_version.cpython-312.pyc",
     "QP.md",
     "ccbf.md",
     "gpt.md"

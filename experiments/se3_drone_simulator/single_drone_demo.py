@@ -366,6 +366,13 @@ def main():
     """
     メイン関数
     """
+    # コマンドライン引数の解析
+    import argparse
+    parser = argparse.ArgumentParser(description='単一ドローンのシミュレーションデモ')
+    parser.add_argument('--use-cbf', action='store_true', help='CBF制約を使用する')
+    parser.add_argument('--obstacles', type=int, default=0, help='障害物の数')
+    args = parser.parse_args()
+    
     # ドローンの初期化（視野角を狭く設定：π/6 = 30度）
     drone = Drone(fov_angle=np.pi/6)
     # ドローンの初期位置を設定
@@ -386,6 +393,21 @@ def main():
                     fp = FeaturePoint([x, y, z])
                     feature_points.append(fp)
     
+    # 障害物の追加（ランダムな位置）
+    obstacles = []
+    if args.obstacles > 0:
+        import random
+        for _ in range(args.obstacles):
+            obstacle_pos = np.array([
+                random.uniform(-3.0, 3.0),
+                random.uniform(-3.0, 3.0),
+                random.uniform(-3.0, 3.0)
+            ])
+            # 原点付近は避ける
+            if np.linalg.norm(obstacle_pos) < 1.0:
+                obstacle_pos = obstacle_pos / np.linalg.norm(obstacle_pos) * 1.0
+            obstacles.append(obstacle_pos)
+    
     # 初期の目標位置
     initial_target = np.array([-2.0, 2.0, 2.0])
     
@@ -395,21 +417,54 @@ def main():
     # 固定目標位置
     target_position = np.array([-2.0, 2.0, 1.5])
     
+    # CBF制約を使用するかどうかを表示
+    if args.use_cbf:
+        print("CBF制約を使用します")
+    else:
+        print("CBF制約を使用しません")
+    
+    # 障害物の数を表示
+    if args.obstacles > 0:
+        print(f"{args.obstacles}個の障害物を追加しました")
+        for i, obs in enumerate(obstacles):
+            print(f"障害物{i+1}の位置: {obs}")
+    
     # ドローンの入力関数（目標位置追従）
     def drone_input_func(drone, frame):
         # 目標位置は固定
         visualizer.target_position = target_position
         
         # 目標位置に追従するための制御入力を計算
-        from cbf_se3 import compute_position_tracking_control
-        xi = compute_position_tracking_control(drone, target_position, K_p=1.0, K_r=0.5)
-        # xi = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        from cbf_se3 import compute_position_tracking_control, solve_single_drone_qp, compute_single_drone_cbf_constraints
+        
+        # 目標制御入力
+        xi_des = compute_position_tracking_control(drone, target_position, K_p=1.0, K_r=0.5)
+        
+        # CBF制約を使用する場合
+        if args.use_cbf and args.obstacles > 0:
+            # CBF制約の計算
+            cbf_constraints = compute_single_drone_cbf_constraints(
+                drone, obstacles, safety_distance=0.5, gamma=0.1)
+            
+            # CBF制約付きQPを解く
+            xi = solve_single_drone_qp(
+                drone, target_position, xi_des=xi_des, 
+                use_cbf=True, cbf_constraints=cbf_constraints)
+        else:
+            # CBF制約なしの場合は目標制御入力をそのまま使用
+            xi = xi_des
         
         # 10フレームごとに位置誤差を表示
         if frame % 10 == 0:
             position_error = np.linalg.norm(target_position - drone.T.p)
             print(f"フレーム {frame}: 位置誤差 = {position_error:.4f}")
             print(f"ドローン位置: {drone.T.p}, 目標位置: {target_position}")
+            
+            # 障害物との距離を表示
+            if args.obstacles > 0:
+                for i, obs in enumerate(obstacles):
+                    dist = np.linalg.norm(drone.T.p - obs)
+                    print(f"障害物{i+1}との距離: {dist:.4f}")
         
         return xi
     
