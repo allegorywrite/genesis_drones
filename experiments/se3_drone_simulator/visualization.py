@@ -39,6 +39,11 @@ class Visualizer:
         self.trajectory_artists = []
         self.invisible_feature_artists = []  # どちらの視野にも入っていない特徴点
         
+        # 目標位置の描画アーティスト
+        self.target_positions = []
+        self.target_artists = []
+        self.target_line_artists = []
+        
         # 安全集合B_ijの時間遷移用の図
         self.fig_safety = plt.figure(figsize=(8, 6))
         self.ax_safety = self.fig_safety.add_subplot(111)
@@ -135,6 +140,9 @@ class Visualizer:
         
         # 共有視野の描画を更新
         self._update_cofov()
+        
+        # 目標位置の描画を更新
+        self._update_target_positions()
         
         # 軌道を更新
         self._update_trajectories()
@@ -341,6 +349,49 @@ class Visualizer:
         self.ax_safety.relim()
         self.ax_safety.autoscale_view()
     
+    def _update_target_positions(self):
+        """
+        目標位置の描画を更新
+        """
+        # 古い目標位置の描画を削除
+        for artist in self.target_artists:
+            artist.remove()
+        self.target_artists = []
+        
+        for artist in self.target_line_artists:
+            artist.remove()
+        self.target_line_artists = []
+        
+        # 目標位置が設定されていない場合は何もしない
+        if not self.target_positions:
+            return
+        
+        # 各ドローンの目標位置を描画
+        for i, target_pos in enumerate(self.target_positions):
+            if i >= len(self.simulator.drones):
+                continue
+                
+            color = self.drone_colors[i % len(self.drone_colors)]
+            
+            # 目標位置を大きな星マーカーで表示
+            target_artist = self.ax.scatter(
+                [target_pos[0]], 
+                [target_pos[1]], 
+                [target_pos[2]],
+                marker='*', color=color, s=200, alpha=0.7, label=f'Target {i}'
+            )
+            self.target_artists.append(target_artist)
+            
+            # ドローンと目標位置を結ぶ線
+            drone_pos = self.simulator.drones[i].T.p
+            target_line = self.ax.plot(
+                [drone_pos[0], target_pos[0]],
+                [drone_pos[1], target_pos[1]],
+                [drone_pos[2], target_pos[2]],
+                '--', color=color, alpha=0.5
+            )[0]
+            self.target_line_artists.append(target_line)
+    
     def animate(self, num_frames, drone_inputs_func=None):
         """
         アニメーションを作成
@@ -386,6 +437,8 @@ class Visualizer:
             artists.extend(self.invisible_feature_artists)
             artists.extend(self.cofov_artists)
             artists.extend(self.trajectory_artists)
+            artists.extend(self.target_artists)
+            artists.extend(self.target_line_artists)
             artists.append(self.safety_line)
             
             return artists

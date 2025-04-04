@@ -10,6 +10,7 @@ from visualization import Visualizer
 import random
 import argparse
 from scipy.spatial.transform import Rotation as R
+from cbf_se3 import compute_barrier_function, sample_safe_configuration, generate_safe_control_inputs, generate_position_tracking_control_inputs, compute_position_tracking_control
 
 
 def random_rotation_matrix():
@@ -60,10 +61,16 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='SE(3)ドローンシミュレータ')
     parser.add_argument('--fov', type=float, default=30.0,
                         help='視野角（度）（デフォルト: 30.0）')
-    parser.add_argument('--min-shared', type=int, default=3,
-                        help='最小共有特徴点数（デフォルト: 3）')
+    parser.add_argument('--min-barrier', type=float, default=0.0,
+                        help='最小安全集合値（デフォルト: 0.0）')
     parser.add_argument('--max-attempts', type=int, default=1000,
                         help='最大試行回数（デフォルト: 1000）')
+    parser.add_argument('--use-cbf', action='store_true',
+                        help='Control Barrier Functionを使用するかどうか')
+    parser.add_argument('--q', type=float, default=0.5,
+                        help='確率の閾値（デフォルト: 0.5）')
+    parser.add_argument('--gamma', type=float, default=0.1,
+                        help='CBFのゲイン（デフォルト: 0.1）')
     return parser.parse_args()
 
 def main():
@@ -94,68 +101,59 @@ def main():
                     simulator.add_feature_point(fp)
     
     # ドローン2の位置と姿勢をランダムにサンプリングし、
-    # 共有視野内の特徴点が見つかるまで繰り返す
-    max_attempts = args.max_attempts  # 最大試行回数
-    min_shared_points = args.min_shared  # 最小共有特徴点数
+    # 安全集合の値が指定値以上になるまで繰り返す
+    success, attempts, barrier_value = sample_safe_configuration(
+        simulator, fov_angle_rad, args.min_barrier, args.max_attempts)
     
-    print(f"視野角: {args.fov}度（{fov_angle_rad:.4f}ラジアン）")
-    print(f"ドローン2の位置と姿勢をランダムにサンプリングしています...")
-    print(f"共有視野内に{min_shared_points}個以上の特徴点が見つかるまで繰り返します...")
-    
-    for attempt in range(max_attempts):
-        # ドローン2をシミュレータから削除（2回目以降のループ用）
-        if len(simulator.drones) > 1:
-            simulator.drones.pop()
-        
-        # ドローン2: ランダムな位置と姿勢、指定された視野角
-        rot_matrix = random_rotation_matrix()
-        position = random_position(min_val=-3.0, max_val=3.0)
-        
-        # 位置が原点に近すぎる場合は調整（ドローン1と重ならないように）
-        if np.linalg.norm(position) < 1.0:
-            position = position / np.linalg.norm(position) * 1.0
-        
-        drone2 = Drone(SE3(rot_matrix, position), fov_angle=fov_angle_rad)
-        simulator.add_drone(drone2)
-        
-        # 共有視野内の特徴点を確認
+    # 安全集合の値を表示
+    if success:
+        # 共有視野内の特徴点も表示
         cofov_indices = simulator.get_cofov_feature_points(0, 1)
-        
-        # 進捗表示（100回ごと）
-        if attempt % 100 == 0 and attempt > 0:
-            print(f"  {attempt}回試行: 共有特徴点数 = {len(cofov_indices)}")
-        
-        # 共有視野内の特徴点が一定数以上あれば終了
-        if len(cofov_indices) >= min_shared_points:
-            print(f"成功! {attempt + 1}回目の試行で共有視野内に{len(cofov_indices)}個の特徴点が見つかりました")
-            print(f"ドローン2の位置: {position}")
-            print(f"ドローン2の回転行列:\n{rot_matrix}")
+        print(f"共有視野内の特徴点数: {len(cofov_indices)}")
+        if len(cofov_indices) > 0:
             print("共有視野内の特徴点インデックス:", cofov_indices)
             print("共有視野内の特徴点座標:")
             for idx in cofov_indices:
                 fp = simulator.feature_points[idx]
                 print(f"  特徴点 {idx}: {fp.position}")
-            break
-    else:
-        print(f"警告: {max_attempts}回の試行で共有視野内に{min_shared_points}個以上の特徴点が見つかりませんでした")
-        print(f"最後の試行での共有特徴点数: {len(cofov_indices)}")
     
-    # 可視化の初期化
+    # 固定目標位置
+    target_positions = [
+        np.array([2.0, 2.0, 1.0]),  # ドローン1の目標位置
+        np.array([-2.0, -2.0, 1.5])  # ドローン2の目標位置
+    ]
+    
+    # 可視化の初期化（目標位置を設定）
     visualizer = Visualizer(simulator)
+    visualizer.target_positions = target_positions
 
-    # ドローンの入力関数（円運動）
+    # ドローンの入力関数
     def drone_inputs_func(sim, frame):
-        # ドローン1: x軸周りの回転と前進
-        omega1 = np.array([0.2, 0.0, 0.0])  # x軸周りの回転
-        v1 = np.array([0.1, 0.0, 0.0])      # x軸方向の前進
-        xi1 = np.concatenate([omega1, v1])
+        # 目標位置は固定
+        p1_des, p2_des = target_positions
         
-        # ドローン2: x軸周りの回転と上昇
-        omega2 = np.array([0.2, 0.0, 0.0])  # x軸周りの回転
-        v2 = np.array([0.0, 0.0, 0.1])      # z軸方向の上昇
-        xi2 = np.concatenate([omega2, v2])
-        
-        return [xi1, xi2]
+        # Control Barrier Functionを使用する場合
+        if args.use_cbf:
+            # 目標位置追従のための安全な制御入力を生成
+            xi1, xi2 = generate_position_tracking_control_inputs(
+                sim, p1_des, p2_des, K_p=1.0, q=args.q, gamma=args.gamma)
+            
+            # 現在の安全集合の値と位置誤差を表示（10フレームごと）
+            if frame % 10 == 0:
+                barrier_value = compute_barrier_function(
+                    sim.drones[0], sim.drones[1], sim.feature_points, args.q)
+                p1_error = np.linalg.norm(p1_des - sim.drones[0].T.p)
+                p2_error = np.linalg.norm(p2_des - sim.drones[1].T.p)
+                print(f"フレーム {frame}: 安全集合の値 = {barrier_value:.4f}")
+                print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
+                print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
+            
+            return [xi1, xi2]
+        else:
+            # CBFを使用しない場合は単純な位置追従制御
+            xi1 = compute_position_tracking_control(sim.drones[0], p1_des, K_p=1.0)
+            xi2 = compute_position_tracking_control(sim.drones[1], p2_des, K_p=1.0)
+            return [xi1, xi2]
 
     # アニメーションの作成と表示
     num_frames = 200

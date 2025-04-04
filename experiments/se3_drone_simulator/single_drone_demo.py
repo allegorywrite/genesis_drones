@@ -9,6 +9,7 @@ from matplotlib.animation import FuncAnimation
 from se3 import SE3
 from drone import Drone, FeaturePoint
 from simulator import Simulator
+from scipy.spatial.transform import Rotation
 
 
 class SingleDroneVisualizer:
@@ -16,7 +17,7 @@ class SingleDroneVisualizer:
     単一ドローンのシミュレータの可視化
     """
     
-    def __init__(self, drone, feature_points, figsize=(10, 8)):
+    def __init__(self, drone, feature_points, target_position=None, figsize=(10, 8)):
         """
         可視化を初期化
         
@@ -26,11 +27,14 @@ class SingleDroneVisualizer:
             ドローン
         feature_points : list of FeaturePoint
             特徴点のリスト
+        target_position : array_like, shape (3,), optional
+            目標位置（デフォルトはNone）
         figsize : tuple, optional
             図のサイズ（デフォルトは(10, 8)）
         """
         self.drone = drone
         self.feature_points = feature_points
+        self.target_position = target_position
         self.fig = plt.figure(figsize=figsize)
         self.ax = self.fig.add_subplot(111, projection='3d')
         
@@ -43,6 +47,10 @@ class SingleDroneVisualizer:
         self.feature_artists = []
         self.visible_feature_artists = []
         self.trajectory_artist = None
+        
+        # 目標位置の描画アーティスト
+        self.target_artist = None
+        self.target_line_artist = None
         
         # ドローンの軌道を記録
         self.trajectory = []
@@ -121,6 +129,9 @@ class SingleDroneVisualizer:
         
         # 視野内の特徴点を強調表示
         self._update_visible_features()
+        
+        # 目標位置を更新
+        self._update_target_position()
         
         # 軌道を更新
         self._update_trajectory()
@@ -260,6 +271,37 @@ class SingleDroneVisualizer:
         # 時間を進める
         self.time += self.dt
     
+    def _update_target_position(self):
+        """
+        目標位置の描画を更新
+        """
+        # 目標位置が設定されていない場合は何もしない
+        if self.target_position is None:
+            return
+        
+        # 古い目標位置の描画を削除
+        if self.target_artist is not None:
+            self.target_artist.remove()
+        if self.target_line_artist is not None:
+            self.target_line_artist.remove()
+        
+        # 目標位置を大きな星マーカーで表示
+        self.target_artist = self.ax.scatter(
+            [self.target_position[0]], 
+            [self.target_position[1]], 
+            [self.target_position[2]],
+            marker='*', color='r', s=200, alpha=0.7, label='Target Position'
+        )
+        
+        # ドローンと目標位置を結ぶ線
+        drone_pos = self.drone.T.p
+        self.target_line_artist = self.ax.plot(
+            [drone_pos[0], self.target_position[0]],
+            [drone_pos[1], self.target_position[1]],
+            [drone_pos[2], self.target_position[2]],
+            '--', color='r', alpha=0.5
+        )[0]
+        
     def animate(self, num_frames, input_func=None):
         """
         アニメーションを作成
@@ -301,6 +343,10 @@ class SingleDroneVisualizer:
             artists.extend(self.visible_feature_artists)
             if self.trajectory_artist is not None:
                 artists.append(self.trajectory_artist)
+            if self.target_artist is not None:
+                artists.append(self.target_artist)
+            if self.target_line_artist is not None:
+                artists.append(self.target_line_artist)
             
             return artists
         
@@ -322,6 +368,11 @@ def main():
     """
     # ドローンの初期化（視野角を狭く設定：π/6 = 30度）
     drone = Drone(fov_angle=np.pi/6)
+    # ドローンの初期位置を設定
+    drone.T.p = np.array([0.0, 0.0, 0.0])
+    # ドローンの初期姿勢を設定
+    initial_euler = np.array([1.0, -1.0, -2.0])
+    drone.T.R = Rotation.from_euler('xyz', initial_euler).as_matrix()
     
     # 特徴点の追加
     feature_points = []
@@ -335,15 +386,31 @@ def main():
                     fp = FeaturePoint([x, y, z])
                     feature_points.append(fp)
     
-    # 可視化の初期化
-    visualizer = SingleDroneVisualizer(drone, feature_points)
+    # 初期の目標位置
+    initial_target = np.array([-2.0, 2.0, 2.0])
     
-    # ドローンの入力関数（円運動）
+    # 可視化の初期化（目標位置を設定）
+    visualizer = SingleDroneVisualizer(drone, feature_points, target_position=initial_target)
+    
+    # 固定目標位置
+    target_position = np.array([-2.0, 2.0, 1.5])
+    
+    # ドローンの入力関数（目標位置追従）
     def drone_input_func(drone, frame):
-        # x軸周りの回転と前進
-        omega = np.array([1.0, 0.0, 0.0])  # x軸周りの回転
-        v = np.array([1.0, 1.0, 0.0])      # x軸方向の前進
-        xi = np.concatenate([omega, v])
+        # 目標位置は固定
+        visualizer.target_position = target_position
+        
+        # 目標位置に追従するための制御入力を計算
+        from cbf_se3 import compute_position_tracking_control
+        xi = compute_position_tracking_control(drone, target_position, K_p=1.0, K_r=0.5)
+        # xi = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+        
+        # 10フレームごとに位置誤差を表示
+        if frame % 10 == 0:
+            position_error = np.linalg.norm(target_position - drone.T.p)
+            print(f"フレーム {frame}: 位置誤差 = {position_error:.4f}")
+            print(f"ドローン位置: {drone.T.p}, 目標位置: {target_position}")
+        
         return xi
     
     # アニメーションの作成と表示

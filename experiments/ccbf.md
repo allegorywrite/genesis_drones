@@ -101,9 +101,34 @@ P_i^l &= \frac{\beta_l^\top(p_i) R_i e_c -\cos\Psi_\mathcal{F} }{1-\cos\Psi_\mat
 \begin{bmatrix}\omega\\v
 \end{bmatrix}
 \right\rangle\\
-\mathrm{grad}_R\:P_i^l &= \frac{1}{1-\cos \psi_\mathcal{F}}(-\frac{e_c^\top R_i^\top P_{\beta_l}}{d}v)\\
-\mathrm{grad}_p\:P_i^l &= \frac{1}{1-\cos \psi_\mathcal{F}}(-\beta_l^\top(p_i) R_i [e_c]_\times)\\
+\mathrm{grad}_p\:P_i^l &= \frac{1}{1-\cos \psi_\mathcal{F}}(-\frac{e_c^\top R_i^\top P_{\beta_l}}{d})\\
+\mathrm{grad}_R\:P_i^l &= \frac{1}{1-\cos \psi_\mathcal{F}}(-\beta_l^\top(p_i) R_i [e_c]_\times)\\
 P_{\beta_l} &= I-\beta\beta^\top
+\end{align}
+$$
+
+ボディ座標系における運動方程式を離散化すると
+$$
+\begin{align}
+T_{k+1}&\simeq T_k+\dot T_k \\
+&\simeq T_k+h T_k\xi^\wedge_{B,k} \\
+&= T_k
++h\begin{bmatrix}
+R_k&p_k\\
+0&1
+\end{bmatrix}
+\begin{bmatrix}
+[\omega_k]_\times&v_k\\
+0&0
+\end{bmatrix}\\
+\end{align}
+$$
+成分分解すると
+$$
+\begin{align}
+R_{k+1}&\simeq  R_k\exp(h[\omega_k]_{\times})\\
+&\simeq R_k(I+h[\omega_k]_{\times})\\
+p_{k+1}&=hR_kv_k+p_k
 \end{align}
 $$
 
@@ -141,9 +166,90 @@ $$
 \begin{align}
 \sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_j^l \langle \mathrm{grad}_R\:P_i^l,\omega_i\rangle&+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_i^l \langle \mathrm{grad}_R\:P_j^l,\omega_j \rangle \\
 &> -c_1 \gamma (1-q-\prod_{l\in\mathcal{L}}(1-\phi_{ij}^k))\\
-\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_j^l \langle \mathrm{grad}_v\:P_i^l,v_i\rangle&+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_i^l \langle \mathrm{grad}_v\:P_j^l, v_j\rangle\\
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_j^l \langle \mathrm{grad}_p\:P_i^l,v_i\rangle&+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))P_i^l \langle \mathrm{grad}_p\:P_j^l, v_j\rangle\\
 &> -c_2 \gamma (1-q-\prod_{l\in\mathcal{L}}(1-\phi_{ij}^k))\\
 c_1 + c_2 &= \gamma_0 > 0
 \end{align}
 $$
 
+よってQPは以下のようになる．
+$$
+\begin{align}
+ \min_{\xi_i, \xi_j}\:\sum_{i,j}(p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})^\top Q_1 & (p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})
++ 
+\begin{bmatrix}
+\omega_{i,k}\\v_{i,k}
+\end{bmatrix}^\top Q_2
+\begin{bmatrix}
+\omega_{i,k}\\v_{i,k}
+\end{bmatrix}\\
+\mathrm{s.t.}
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k)) \frac{P_j^l\beta_l^\top(p_i) R_i [e_c]_\times}{1-\cos \psi_\mathcal{F}}\omega_i&+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k)) 
+\frac{P_i^l\beta_l^\top(p_j) R_j [e_c]_\times}{1-\cos \psi_\mathcal{F}}\omega_j
+\\
+&< c_1 \gamma (1-q-\prod_{l\in\mathcal{L}}(1-\phi_{ij}^k))\\
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))\frac{P_j^le_c^\top R_i^\top P_{\beta_l}}{(1-\cos \psi_\mathcal{F})d}v_i&
++\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))\frac{P_i^le_c^\top R_j^\top P_{\beta_l}}{(1-\cos \psi_\mathcal{F})d}v_j\\
+&< c_2 \gamma (1-q-\prod_{l\in\mathcal{L}}(1-\phi_{ij}^k))\\
+c_1 + c_2 &= \gamma_0 > 0
+\end{align}
+$$
+
+一般的なQPの形式に変更すると以下のように表せる．
+$$
+\begin{align}
+&\min_{\xi_i, \xi_j}\:\sum_{i,j}J_i\\
+J_i &= \frac{1}{2}\xi_{i,k}^\top H_i\xi_{i,k} + f_i^T\xi_{i,k}\\
+\xi_{i,k} &= \begin{bmatrix}
+\omega_{i,k}\\v_{i,k}
+\end{bmatrix},
+H_i = 2\begin{bmatrix}
+Q_{2,\omega}&Q_{2,\omega v}\\ Q^\top_{2,\omega}&Q_{2,v}+h^2R_{i,k}^\top Q_1R_{i,k}
+\end{bmatrix},
+f_i = \begin{bmatrix}
+0\\-2hR_i^\top Q_1 e_i
+\end{bmatrix}\\
+\mathrm{s.t.} &\quad\begin{bmatrix}
+\alpha_\omega&0&\beta_\omega&0\\0&\alpha_v&0&\beta_v
+\end{bmatrix}
+\begin{bmatrix}
+\omega_{i,k}\\v_{i,k}\\\omega_{j,k}\\v_{j,k}
+\end{bmatrix}\leq
+\begin{bmatrix}
+c_1\\c_2
+\end{bmatrix}\gamma, \quad c_1+c_2 =\gamma_0 > 0\\
+\end{align}
+$$
+もしくは目的関数$J_i, J_j$を合成して
+$$
+\begin{align}
+&\min_{\xi_k} \quad \frac{1}{2}\xi_k^\top \begin{bmatrix} H_i & 0 \\ 0 & H_j \end{bmatrix}\xi_k + \begin{bmatrix} f_i\\ f_j \end{bmatrix}^\top\xi_k,\\
+\xi_k &= \begin{bmatrix}
+\xi_{i,k}\\\xi_{j,k}
+\end{bmatrix},
+H_i = 2\begin{bmatrix}
+Q_{2,\omega}&Q_{2,\omega v}\\ Q^\top_{2,\omega}&Q_{2,v}+h^2R_{i,k}^\top Q_1R_{i,k}
+\end{bmatrix},
+f_i = \begin{bmatrix}
+0\\-2hR_i^\top Q_1 e_i
+\end{bmatrix}\\
+\mathrm{s.t.} &\quad\begin{bmatrix}
+\alpha_\omega&0&\beta_\omega&0\\0&\alpha_v&0&\beta_v
+\end{bmatrix}
+\xi_k\leq
+\begin{bmatrix}
+c_1\\c_2
+\end{bmatrix}\gamma, \quad c_1+c_2 =\gamma_0 > 0\\
+\end{align}
+$$
+なおCBFによる制約式の係数は
+$$
+\begin{align}
+\alpha_\omega&=\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k)) \frac{P_j^l\beta_l^\top(p_i) R_i [e_c]_\times}{1-\cos \psi_\mathcal{F}}\in\mathbb{R}^3\\
+\beta_\omega&=\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k)) 
+\frac{P_i^l\beta_l^\top(p_j) R_j [e_c]_\times}{1-\cos \psi_\mathcal{F}}\in\mathbb{R}^3\\
+\alpha_v&=\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))\frac{P_j^le_c^\top R_i^\top P_{\beta_l}}{(1-\cos \psi_\mathcal{F})d}\in\mathbb{R}^3\\
+\beta_v&=\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-\phi_{ij}^k))\frac{P_i^le_c^\top R_j^\top P_{\beta_l}}{(1-\cos \psi_\mathcal{F})d}\in\mathbb{R}^3\\
+\gamma &= 1-q-\prod_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(1-\phi_{ij}^k)\in\mathbb{R}
+\end{align}
+$$
