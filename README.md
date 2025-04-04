@@ -1,6 +1,7 @@
 # Genesis Drones
 
 マルチドローンシミュレーションのためのROS 2パッケージ
+(ROS 2 package for multi-drone simulation)
 
 ## 概要
 
