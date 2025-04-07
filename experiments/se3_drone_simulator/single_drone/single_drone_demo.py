@@ -30,6 +30,8 @@ def main():
     parser.add_argument('--cbf-method', type=str, choices=['pcl', 'point'], default='pcl',
                         help='CBF制約の方法: pcl (複数特徴点に対するCBF) または point (単一特徴点に対するCBF)')
     parser.add_argument('--obstacles', type=int, default=0, help='障害物の数')
+    parser.add_argument('--keep-fov-history', action='store_true', help='過去の視野錐台描画を残す')
+    parser.add_argument('--fov-save-interval', type=int, default=10, help='視野錐台を保存する間隔（フレーム数）')
     args = parser.parse_args()
     
     # 特徴点の追加（より局在化された配置）
@@ -58,7 +60,13 @@ def main():
     target_position = np.array([3.0, 0.0, 0.0])
     
     # 可視化の初期化（目標位置を設定）
-    visualizer = SingleDroneVisualizer(drone, feature_points, target_position=target_position)
+    visualizer = SingleDroneVisualizer(
+        drone, 
+        feature_points, 
+        target_position=target_position,
+        keep_fov_history=args.keep_fov_history,
+        fov_save_interval=args.fov_save_interval
+    )
     
     # CBF制約を使用するかどうかを表示
     if args.use_cbf:

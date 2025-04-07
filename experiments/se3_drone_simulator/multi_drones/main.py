@@ -11,7 +11,7 @@ import random
 import argparse
 from scipy.spatial.transform import Rotation as R
 from utils.cbf_se3 import sample_safe_configuration, compute_position_tracking_control
-from utils.solver import solve_direct_cbf_qp, solve_direct_qp
+from utils.solver import solve_direct_cbf_qp, solve_direct_qp, solve_distributed_ieq_pdmm_qp
 
 def random_rotation_matrix():
     """
@@ -76,7 +76,18 @@ def parse_arguments():
     parser.add_argument('--c2', type=float, default=0.5,
                         help='CBF制約の重み2（デフォルト: 0.5）')
     parser.add_argument('--h', type=float, default=0.1,
-                        help='時間ステップ（デフォルト: 0.01）')
+                        help='時間ステップ（デフォルト: 0.1）')
+    parser.add_argument('--optimization-method', type=str, default='centralized',
+                        choices=['centralized', 'distributed'],
+                        help='最適化手法（centralized: 集中型, distributed: 分散型）')
+    parser.add_argument('--c', type=float, default=1.0,
+                        help='分散型最適化のペナルティパラメータ（デフォルト: 1.0）')
+    parser.add_argument('--max-iter', type=int, default=10,
+                        help='分散型最適化の最大反復回数（デフォルト: 10）')
+    parser.add_argument('--keep-fov-history', action='store_true',
+                        help='過去の視野錐台描画を残すかどうか')
+    parser.add_argument('--fov-save-interval', type=int, default=10,
+                        help='視野錐台を保存する間隔（フレーム数）（デフォルト: 10）')
     return parser.parse_args()
 
 def main():
@@ -130,7 +141,11 @@ def main():
     ]
     
     # 可視化の初期化（目標位置を設定）
-    visualizer = Visualizer(simulator)
+    visualizer = Visualizer(
+        simulator,
+        keep_fov_history=args.keep_fov_history,
+        fov_save_interval=args.fov_save_interval
+    )
     visualizer.target_positions = target_positions
 
     # ドローンの入力関数
@@ -140,11 +155,35 @@ def main():
         
         # Control Barrier Functionを使用する場合
         if args.use_cbf:
-            # 直接目標位置から制御入力を計算
-            xi1, xi2, constraint_values = solve_direct_cbf_qp(
-                sim.drones[0], sim.drones[1], sim.feature_points, 
-                p1_des, p2_des, q=args.q, gamma0=args.gamma, 
-                c1=args.c1, c2=args.c2, h=args.h)
+            # 最適化手法に基づいて適切な関数を呼び出す
+            if args.optimization_method == 'distributed':
+                # 分散型最適化（IEQ-PDMM）
+                xi1, xi2, constraint_values = solve_distributed_ieq_pdmm_qp(
+                    sim.drones[0], sim.drones[1], sim.feature_points, 
+                    p1_des, p2_des, q=args.q, gamma0=args.gamma, 
+                    c=args.c, max_iter=args.max_iter, h=args.h)
+                
+                # 現在の安全集合の値と位置誤差を表示（10フレームごと）
+                if frame % 10 == 0:
+                    p1_error = np.linalg.norm(p1_des - sim.drones[0].T.p)
+                    p2_error = np.linalg.norm(p2_des - sim.drones[1].T.p)
+                    print(f"フレーム {frame}: 分散型最適化（IEQ-PDMM）")
+                    print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
+                    print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
+            else:
+                # 集中型最適化（既存の実装）
+                xi1, xi2, constraint_values = solve_direct_cbf_qp(
+                    sim.drones[0], sim.drones[1], sim.feature_points, 
+                    p1_des, p2_des, q=args.q, gamma0=args.gamma, 
+                    c1=args.c1, c2=args.c2, h=args.h)
+                
+                # 現在の安全集合の値と位置誤差を表示（10フレームごと）
+                if frame % 10 == 0:
+                    p1_error = np.linalg.norm(p1_des - sim.drones[0].T.p)
+                    p2_error = np.linalg.norm(p2_des - sim.drones[1].T.p)
+                    print(f"フレーム {frame}: 集中型最適化")
+                    print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
+                    print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
             
             # 現在の安全集合の値と位置誤差を表示（10フレームごと）
             # if frame % 10 == 0:

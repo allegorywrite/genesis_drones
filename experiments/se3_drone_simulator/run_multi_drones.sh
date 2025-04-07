@@ -10,6 +10,11 @@ GAMMA=0.1
 C1=0.5
 C2=0.5
 H=0.02
+OPTIMIZATION_METHOD="centralized"
+C=10.0
+MAX_ITER=10
+KEEP_FOV_HISTORY=false
+FOV_SAVE_INTERVAL=10
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do
@@ -46,6 +51,26 @@ while [[ $# -gt 0 ]]; do
       C2="$2"
       shift 2
       ;;
+    --optimization-method)
+      OPTIMIZATION_METHOD="$2"
+      shift 2
+      ;;
+    --c)
+      C="$2"
+      shift 2
+      ;;
+    --max-iter)
+      MAX_ITER="$2"
+      shift 2
+      ;;
+    --keep-fov-history)
+      KEEP_FOV_HISTORY=true
+      shift
+      ;;
+    --fov-save-interval)
+      FOV_SAVE_INTERVAL="$2"
+      shift 2
+      ;;
     *)
       echo "不明な引数: $1"
       exit 1
@@ -66,11 +91,17 @@ if [ "$USE_CBF" = true ]; then
 fi
 
 # 実行するコマンドを構築
-CMD="python multi_drones/main.py --fov $FOV --min-barrier $MIN_BARRIER --max-attempts $MAX_ATTEMPTS --q $Q --gamma $GAMMA --c1 $C1 --c2 $C2 --h $H"
+CMD="python multi_drones/main.py --fov $FOV --min-barrier $MIN_BARRIER --max-attempts $MAX_ATTEMPTS --q $Q --gamma $GAMMA --c1 $C1 --c2 $C2 --h $H --optimization-method $OPTIMIZATION_METHOD --c $C --max-iter $MAX_ITER"
 
 if [ -n "$CBF_FLAG" ]; then
   CMD="$CMD $CBF_FLAG"
 fi
+
+if [ "$KEEP_FOV_HISTORY" = true ]; then
+  CMD="$CMD --keep-fov-history"
+fi
+
+CMD="$CMD --fov-save-interval $FOV_SAVE_INTERVAL"
 
 # 実行するコマンドを表示
 echo "実行: $CMD"

@@ -13,7 +13,8 @@ class SingleDroneVisualizer:
     単一ドローンのシミュレータの可視化
     """
     
-    def __init__(self, drone, feature_points, target_position=None, figsize=(12, 10)):
+    def __init__(self, drone, feature_points, target_position=None, figsize=(12, 10), 
+                 keep_fov_history=False, fov_save_interval=10):
         """
         可視化を初期化
         
@@ -27,6 +28,10 @@ class SingleDroneVisualizer:
             目標位置（デフォルトはNone）
         figsize : tuple, optional
             図のサイズ（デフォルトは(12, 10)）
+        keep_fov_history : bool, optional
+            過去の視野錐台描画を残すかどうか（デフォルトはFalse）
+        fov_save_interval : int, optional
+            視野錐台を保存する間隔（フレーム数）（デフォルトは10）
         """
         self.drone = drone
         self.feature_points = feature_points
@@ -81,6 +86,18 @@ class SingleDroneVisualizer:
         self.visible_feature_artists = []
         self.trajectory_artist = None
         
+        # 過去の視野錐台を保存するためのリスト
+        self.past_fov_artists = []
+        
+        # 過去の視野錐台を保存するかどうか
+        self.keep_fov_history = keep_fov_history
+        
+        # 視野錐台を保存する間隔（フレーム数）
+        self.fov_save_interval = fov_save_interval
+        
+        # 現在のフレーム番号
+        self.current_frame = 0
+        
         # 目標位置の描画アーティスト
         self.target_artist = None
         self.target_line_artist = None
@@ -88,8 +105,9 @@ class SingleDroneVisualizer:
         # ドローンの軌道を記録
         self.trajectory = []
         
-        # ドローンの色
-        self.drone_color = 'b'
+        # ドローンの色(黒)
+        # self.drone_color = 'b'
+        self.drone_color = 'k'
         
         # 描画範囲
         self.xlim = (-5, 5)
@@ -234,7 +252,7 @@ class SingleDroneVisualizer:
         
         # 視野角の描画パラメータ
         color = self.drone_color
-        alpha = 0.3
+        alpha = 1.0
         h = 3.0  # 円錐の高さ
         
         # カメラの向きを取得
@@ -284,6 +302,27 @@ class SingleDroneVisualizer:
                                [apex[2], circle_points[i, 2]], 
                                color=color, alpha=alpha)[0]
             self.fov_artists.append(line)
+        
+        # 過去の視野錐台を保存するかどうか
+        if self.keep_fov_history and self.current_frame % self.fov_save_interval == 0:
+            # 現在の視野錐台のコピーを作成して保存
+            saved_fov_artists = []
+            
+            # 底面の円を描画（薄い色で）
+            saved_circle = self.ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2], 
+                                      color=color, alpha=alpha*0.8)[0]
+            saved_fov_artists.append(saved_circle)
+            
+            # 頂点から円周への線分を描画（薄い色で）
+            for i in range(n_points):
+                saved_line = self.ax.plot([apex[0], circle_points[i, 0]], 
+                                        [apex[1], circle_points[i, 1]], 
+                                        [apex[2], circle_points[i, 2]], 
+                                        color=color, alpha=alpha*0.8)[0]
+                saved_fov_artists.append(saved_line)
+            
+            # 保存した視野錐台をリストに追加
+            self.past_fov_artists.extend(saved_fov_artists)
     
     def _update_trajectory(self):
         """
@@ -407,6 +446,9 @@ class SingleDroneVisualizer:
         self.setup_plot()
         
         def update(frame):
+            # フレーム番号を更新
+            self.current_frame = frame
+            
             # ドローンの入力を計算
             if input_func is not None:
                 result = input_func(self.drone, frame)
@@ -436,6 +478,7 @@ class SingleDroneVisualizer:
             # 更新されたアーティストのリストを返す
             artists = [self.drone_point, self.x_axis, self.y_axis, self.z_axis]
             artists.extend(self.fov_artists)
+            artists.extend(self.past_fov_artists)  # 過去の視野錐台も含める
             artists.extend(self.feature_artists)
             artists.extend(self.visible_feature_artists)
             if self.trajectory_artist is not None:

@@ -1,5 +1,6 @@
 """
 SE(3)上の制約付き最適化問題（Control Barrier Function）のソルバーを実装するモジュール
+集中型最適化と分散型最適化（IEQ-PDMM）の両方をサポート
 """
 import numpy as np
 from scipy import optimize
@@ -151,9 +152,202 @@ def solve_direct_qp(drone1, drone2, feature_points, p1_des, p2_des, Q1=None, Q2=
         return xi1_des, xi2_des, None
 
 
+def solve_distributed_ieq_pdmm_qp(drone1, drone2, feature_points, p1_des, p2_des, q=0.5, gamma0=0.1, c=1.0, max_iter=10, Q1=None, Q2=None, h=0.01):
+    """
+    IEQ-PDMMを用いた分散型最適化によりCBF制約付きQP問題を解く（develop.mdのアルゴリズムに基づく実装）
+    
+    Parameters:
+    -----------
+    drone1 : Drone
+        1つ目のドローン
+    drone2 : Drone
+        2つ目のドローン
+    feature_points : list of FeaturePoint
+        環境内の特徴点のリスト
+    p1_des : array_like, shape (3,)
+        ドローン1の目標位置
+    p2_des : array_like, shape (3,)
+        ドローン2の目標位置
+    q : float, optional
+        確率の閾値（デフォルトは0.5）
+    gamma0 : float, optional
+        CBFのゲイン（デフォルトは0.1）
+    c : float, optional
+        ペナルティパラメータ（デフォルトは1.0）
+    max_iter : int, optional
+        最大反復回数（デフォルトは10）
+    Q1 : array_like, optional
+        位置誤差の重み行列（デフォルトは単位行列）
+    Q2 : array_like, optional
+        制御入力の重み行列（デフォルトは単位行列）
+    h : float, optional
+        時間ステップ（デフォルトは0.01）
+        
+    Returns:
+    --------
+    xi1_safe : ndarray, shape (6,)
+        ドローン1の安全な速度入力
+    xi2_safe : ndarray, shape (6,)
+        ドローン2の安全な速度入力
+    constraint_values : tuple
+        制約値 (alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value)
+        constraint_value: 制約余裕の値
+    """
+    # デフォルトの重み行列
+    if Q1 is None:
+        Q1 = np.eye(3)
+    if Q2 is None:
+        Q2 = np.eye(6)*0.01
+    
+    # CBF制約の係数を計算
+    from .cbf_se3 import compute_cbf_constraint_coefficients, compute_gamma_predict
+    alpha_omega, beta_omega, alpha_v, beta_v, gamma_val = compute_cbf_constraint_coefficients(
+        drone1, drone2, feature_points, q)
+    
+    # 安全集合の値が既に負の場合は、安全な入力を見つけるのが難しいため、
+    # 目標入力をそのまま返す
+    if gamma_val < 0:
+        print(f"警告: 安全集合の値が負です (gamma={gamma_val:.4f})")
+        # 目標位置追従のための制御入力を計算
+        from .cbf_se3 import compute_position_tracking_control
+        xi1_des = compute_position_tracking_control(drone1, p1_des, K_p=1.0)
+        xi2_des = compute_position_tracking_control(drone2, p2_des, K_p=1.0)
+        
+        # 制約行列の構築
+        A = np.zeros((1, 12))
+        A[0, :3] = alpha_omega
+        A[0, 3:6] = alpha_v
+        A[0, 6:9] = beta_omega
+        A[0, 9:] = beta_v
+        
+        # 制約の右辺
+        b = np.array([gamma0 * gamma_val])
+        
+        x_des = np.concatenate([xi1_des, xi2_des])
+        constraint_value = np.dot(A, x_des) - b
+        print(f"制約値: {constraint_value}")
+        return xi1_des, xi2_des, (alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value)
+    
+    # ドローン1, 2の目的関数の係数を計算
+    H1, f1 = compute_objective_coefficients(drone1, p1_des, Q1, Q2, h)
+    H2, f2 = compute_objective_coefficients(drone2, p2_des, Q1, Q2, h)
+    
+    # 制約行列の構築
+    # ドローン1の制約行列 A_12
+    A_12 = np.zeros((1, 6))
+    A_12[0, :3] = alpha_omega
+    A_12[0, 3:6] = alpha_v
+    
+    # ドローン2の制約行列 A_21
+    A_21 = np.zeros((1, 6))
+    A_21[0, :3] = beta_omega
+    A_21[0, 3:6] = beta_v
+    
+    # 制約の右辺
+    b = gamma0 * gamma_val / 2  # 各ドローンで半分ずつ
+    
+    # 双対変数の初期化
+    z_12 = np.zeros(1)  # ドローン1からドローン2への双対変数
+    z_21 = np.zeros(1)  # ドローン2からドローン1への双対変数
+    
+    # IEQ-PDMMの反復
+    for iter_idx in range(max_iter):
+        # ドローン1のQP問題を解く
+        # min J_1(ξ_1) + z_1|2^T A_12 ξ_1 + (c/2)||A_12 ξ_1 - (1/2)γ_0 γ||^2
+        H1_pdmm = H1.copy()
+        f1_pdmm = f1.copy()
+        
+        # 双対項とペナルティ項の追加
+        H1_pdmm += c * A_12.T @ A_12
+        f1_pdmm += A_12.T @ (z_12 - c * b)
+        
+        # cvxoptの形式に変換
+        P1 = cvxopt.matrix(H1_pdmm)
+        q1 = cvxopt.matrix(f1_pdmm)
+        
+        # ドローン1のQP問題を解く
+        try:
+            sol1 = cvxopt.solvers.qp(P1, q1)
+            if sol1['status'] == 'optimal':
+                xi1 = np.array(sol1['x']).flatten()
+            else:
+                print(f"警告: ドローン1のQP問題の解決に失敗しました: {sol1['status']}")
+                # 目標位置追従のための制御入力を計算
+                xi1 = compute_position_tracking_control(drone1, p1_des, K_p=1.0)
+        except Exception as e:
+            print(f"警告: ドローン1のQP問題の解決中にエラーが発生しました: {e}")
+            # 目標位置追従のための制御入力を計算
+            xi1 = compute_position_tracking_control(drone1, p1_des, K_p=1.0)
+        
+        # ドローン2のQP問題を解く
+        # min J_2(ξ_2) + z_2|1^T A_21 ξ_2 + (c/2)||A_21 ξ_2 - (1/2)γ_0 γ||^2
+        H2_pdmm = H2.copy()
+        f2_pdmm = f2.copy()
+        
+        # 双対項とペナルティ項の追加
+        H2_pdmm += c * A_21.T @ A_21
+        f2_pdmm += A_21.T @ (z_21 - c * b)
+        
+        # cvxoptの形式に変換
+        P2 = cvxopt.matrix(H2_pdmm)
+        q2 = cvxopt.matrix(f2_pdmm)
+        
+        # ドローン2のQP問題を解く
+        try:
+            sol2 = cvxopt.solvers.qp(P2, q2)
+            if sol2['status'] == 'optimal':
+                xi2 = np.array(sol2['x']).flatten()
+            else:
+                print(f"警告: ドローン2のQP問題の解決に失敗しました: {sol2['status']}")
+                # 目標位置追従のための制御入力を計算
+                xi2 = compute_position_tracking_control(drone2, p2_des, K_p=1.0)
+        except Exception as e:
+            print(f"警告: ドローン2のQP問題の解決中にエラーが発生しました: {e}")
+            # 目標位置追従のための制御入力を計算
+            xi2 = compute_position_tracking_control(drone2, p2_des, K_p=1.0)
+        
+        # 双対変数の更新
+        # y_1|2 = z_1|2 + 2c(A_12 ξ_1 - (1/2)γ_0 γ)
+        y_12 = z_12 + 2 * c * (A_12 @ xi1 - b)
+        
+        # y_2|1 = z_2|1 + 2c(A_21 ξ_2 - (1/2)γ_0 γ)
+        y_21 = z_21 + 2 * c * (A_21 @ xi2 - b)
+        
+        # 双対変数の交換と更新
+        # if y_1|2 + y_2|1 > 0: z_1|2 = y_2|1, z_2|1 = y_1|2
+        # else: z_1|2 = -y_1|2, z_2|1 = -y_2|1
+        if y_12 + y_21 > 0:
+            z_12 = y_21
+            z_21 = y_12
+        else:
+            z_12 = -y_12
+            z_21 = -y_21
+        
+        # 収束判定（オプション）
+        # 例: 双対変数の変化が小さくなったら収束したと判断
+        if iter_idx > 0 and np.linalg.norm(y_12 - z_12) < 1e-6 and np.linalg.norm(y_21 - z_21) < 1e-6:
+            print(f"IEQ-PDMM: {iter_idx+1}回目の反復で収束しました")
+            break
+    
+    # 最終的な制約値の計算
+    A = np.zeros((1, 12))
+    A[0, :3] = alpha_omega
+    A[0, 3:6] = alpha_v
+    A[0, 6:9] = beta_omega
+    A[0, 9:] = beta_v
+    
+    # 制約の右辺
+    b_full = np.array([gamma0 * gamma_val])
+    
+    x_opt = np.concatenate([xi1, xi2])
+    constraint_value = np.dot(A, x_opt) - b_full
+    
+    return xi1, xi2, (alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value)
+
+
 def solve_direct_cbf_qp(drone1, drone2, feature_points, p1_des, p2_des, q=0.5, gamma0=0.1, c1=0.5, c2=0.5, Q1=None, Q2=None, h=0.01):
     """
-    目標位置から直接CBF制約付きQP問題を解く（pcl_ccbf.mdのアルゴリズムに基づく実装）
+    目標位置から直接CBF制約付きQP問題を解く（集中型最適化、pcl_ccbf.mdのアルゴリズムに基づく実装）
     
     Parameters:
     -----------

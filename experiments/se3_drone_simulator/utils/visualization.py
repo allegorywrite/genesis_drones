@@ -16,7 +16,7 @@ class Visualizer:
     SE(3)ドローンシミュレータの可視化
     """
     
-    def __init__(self, simulator, figsize=(12, 10)):
+    def __init__(self, simulator, figsize=(12, 10), keep_fov_history=False, fov_save_interval=10):
         """
         可視化を初期化
         
@@ -26,6 +26,10 @@ class Visualizer:
             シミュレータ
         figsize : tuple, optional
             図のサイズ（デフォルトは(12, 10)）
+        keep_fov_history : bool, optional
+            過去の視野錐台描画を残すかどうか（デフォルトはFalse）
+        fov_save_interval : int, optional
+            視野錐台を保存する間隔（フレーム数）（デフォルトは10）
         """
         self.simulator = simulator
         
@@ -73,6 +77,18 @@ class Visualizer:
         self.cofov_artists = []
         self.trajectory_artists = []
         self.invisible_feature_artists = []  # どちらの視野にも入っていない特徴点
+        
+        # 過去の視野錐台を保存するためのリスト
+        self.past_fov_artists = []
+        
+        # 過去の視野錐台を保存するかどうか
+        self.keep_fov_history = keep_fov_history
+        
+        # 視野錐台を保存する間隔（フレーム数）
+        self.fov_save_interval = fov_save_interval
+        
+        # 現在のフレーム番号
+        self.current_frame = 0
         
         # 目標位置の描画アーティスト
         self.target_positions = []
@@ -250,6 +266,27 @@ class Visualizer:
         
         # 視野角の描画アーティストを保存
         self.fov_artists[drone_idx] = fov_artists
+        
+        # 過去の視野錐台を保存するかどうか
+        if self.keep_fov_history and self.current_frame % self.fov_save_interval == 0:
+            # 現在の視野錐台のコピーを作成して保存
+            saved_fov_artists = []
+            
+            # 底面の円を描画（薄い色で）
+            saved_circle = self.ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2], 
+                                      color=color, alpha=alpha*0.5)[0]
+            saved_fov_artists.append(saved_circle)
+            
+            # 頂点から円周への線分を描画（薄い色で）
+            for i in range(n_points):
+                saved_line = self.ax.plot([apex[0], circle_points[i, 0]], 
+                                        [apex[1], circle_points[i, 1]], 
+                                        [apex[2], circle_points[i, 2]], 
+                                        color=color, alpha=alpha*0.5)[0]
+                saved_fov_artists.append(saved_line)
+            
+            # 保存した視野錐台をリストに追加
+            self.past_fov_artists.extend(saved_fov_artists)
     
     def _update_trajectories(self):
         """
@@ -484,6 +521,9 @@ class Visualizer:
         self.setup_plot()
         
         def update(frame):
+            # フレーム番号を更新
+            self.current_frame = frame
+            
             # ドローンの入力を計算
             if drone_inputs_func is not None:
                 drone_inputs = drone_inputs_func(self.simulator, frame)
@@ -504,6 +544,7 @@ class Visualizer:
             for fov_artist in self.fov_artists:
                 if fov_artist is not None:
                     artists.extend(fov_artist)
+            artists.extend(self.past_fov_artists)  # 過去の視野錐台も含める
             artists.extend(self.feature_artists)
             artists.extend(self.invisible_feature_artists)
             artists.extend(self.cofov_artists)

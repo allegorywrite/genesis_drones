@@ -22,6 +22,7 @@ $$
 <font color="red"> CBFにおけるv_iがワールド座標系なのを忘れていた．．．(修正済) </font>
 
 ここで，$d_{i,l}={\|q_l-p_i\|}$，$P_{\beta_l} = I-\beta\beta^\top$ (投影行列)である．
+
 ### ドローンダイナミクス
 ボディ座標系における速度入力$\xi^\wedge_B$によるSE(3)上の剛体運動式は
 $$
@@ -29,12 +30,12 @@ $$
 T&=\begin{bmatrix}
 R&p\\
 0&1
-\end{bmatrix}\\
-\dot T &= T \xi^\wedge_B\\
+\end{bmatrix}\in\mathrm{SE}(3)\\
 \quad \xi^\wedge_B&=\begin{bmatrix}
 [\omega]_\times&v_b\\
 0&0
-\end{bmatrix}\\
+\end{bmatrix}\in \mathfrak{se}(3)\\
+\dot T &= T \xi^\wedge_B\\
 \end{align}
 $$
 で示される．
@@ -207,6 +208,18 @@ $$
 $$
 よってQPは以下のようになる
 $$
+\begin{align}
+ \min_{\xi_{i,k}}&\:(p^d_{i}-p_{i,{k+1}})^\top Q_1 (p^d_{i}-p_{i,{k+1}})
++ \xi_{i,k}^\top Q_2
+\xi_{i,k}\\
+&\mathrm{s.t.}
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i }(\prod_{k\neq l}(1-P_i^l)) \langle 
+\mathrm{grad}_T\:P_{i}^l,\xi_{i,k}\rangle\\
+&\qquad > - \gamma_0 (1-q-\prod_{l\in\mathcal{L}}(1-P_i^l))\\
+\end{align}
+$$
+
+$$
 \begin{align}\tag{23}
  \min_{\xi_i, c_1}\:(p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})^\top Q_1 & (p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})
 + 
@@ -229,12 +242,12 @@ J_i &= \frac{1}{2}\xi_{i,k}^\top H_i \xi_{i,k} + f_i^T  \xi_{i,k}\\
  \xi_{i,k} &= \begin{bmatrix}
 \omega_{i,k}\\v_{i,k}
 \end{bmatrix},
-H_i = 2\begin{bmatrix}
+\:H_i = 2\begin{bmatrix}
 Q_{2,\omega}&Q_{2,\omega v}\\ Q^\top_{2,\omega}&Q_{2,v}+h^2R_{i,k}^\top Q_1R_{i,k}
 \end{bmatrix},\\
 f_i &= \begin{bmatrix}
 0\\-2hR_i^\top Q_1 e_i
-\end{bmatrix}, e_i = p^d_{i,k}-p_{i,k}\\
+\end{bmatrix}, \:e_i = p^d_{i,k}-p_{i,k}\\
 \mathrm{s.t.} &\quad
 \begin{bmatrix}
 \sum_{l\in \mathcal{L}\subset\mathcal{C}_i}(\prod_{k\neq l}(1-\phi_{i}^k)) \frac{\beta_l^\top(p_i) R_i [e_c]_\times}{1-\cos \psi_\mathcal{F}}
