@@ -2,6 +2,8 @@
 
 # デフォルト値
 USE_CBF=false
+CBF_TYPE="no-decomp"
+CBF_METHOD="pcl"
 OBSTACLES=0
 
 # コマンドライン引数の解析
@@ -10,6 +12,14 @@ while [[ $# -gt 0 ]]; do
     --use-cbf)
       USE_CBF=true
       shift
+      ;;
+    --cbf-type)
+      CBF_TYPE="$2"
+      shift 2
+      ;;
+    --cbf-method)
+      CBF_METHOD="$2"
+      shift 2
       ;;
     --obstacles)
       OBSTACLES="$2"
@@ -22,14 +32,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+cd se3_drone_simulator
+
 # 仮想環境をアクティベート
 source venv/bin/activate
 
 # 引数に基づいてコマンドを構築
-CMD="python single_drone_demo.py"
+CMD="python -m single_drone.single_drone_demo"
 
 if [ "$USE_CBF" = true ]; then
-  CMD="$CMD --use-cbf"
+  CMD="$CMD --use-cbf --cbf-type $CBF_TYPE --cbf-method $CBF_METHOD"
 fi
 
 if [ "$OBSTACLES" -gt 0 ]; then

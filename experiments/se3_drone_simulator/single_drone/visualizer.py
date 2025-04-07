@@ -1,15 +1,11 @@
 """
-単一ドローンのシミュレーションデモ
-視野内の点を強調表示
+ドローンシミュレーションの可視化モジュール
 """
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
-from se3 import SE3
-from drone import Drone, FeaturePoint
-from simulator import Simulator
-from scipy.spatial.transform import Rotation
+import matplotlib.gridspec as gridspec
 
 
 class SingleDroneVisualizer:
@@ -17,7 +13,7 @@ class SingleDroneVisualizer:
     単一ドローンのシミュレータの可視化
     """
     
-    def __init__(self, drone, feature_points, target_position=None, figsize=(10, 8)):
+    def __init__(self, drone, feature_points, target_position=None, figsize=(12, 10)):
         """
         可視化を初期化
         
@@ -30,13 +26,50 @@ class SingleDroneVisualizer:
         target_position : array_like, shape (3,), optional
             目標位置（デフォルトはNone）
         figsize : tuple, optional
-            図のサイズ（デフォルトは(10, 8)）
+            図のサイズ（デフォルトは(12, 10)）
         """
         self.drone = drone
         self.feature_points = feature_points
         self.target_position = target_position
+        
+        # メインの図を作成
         self.fig = plt.figure(figsize=figsize)
-        self.ax = self.fig.add_subplot(111, projection='3d')
+        
+        # グリッドレイアウトを設定
+        gs = gridspec.GridSpec(2, 2, height_ratios=[3, 1])
+        
+        # 3Dシミュレーション用のサブプロット
+        self.ax = self.fig.add_subplot(gs[0, :], projection='3d')
+        
+        # 安全集合と制約余裕用のサブプロット
+        self.ax_safety = self.fig.add_subplot(gs[1, 0])
+        self.ax_constraint = self.fig.add_subplot(gs[1, 1])
+        
+        # 安全集合のプロット設定
+        self.ax_safety.set_xlabel('Time [s]')
+        self.ax_safety.set_ylabel('Safety Value')
+        self.ax_safety.set_title('Safety Value (B) and dB/dt')
+        self.ax_safety.grid(True)
+        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label='B')
+        self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label='dB/dt')
+        self.ax_safety.legend()
+        
+        # 制約余裕のプロット設定
+        self.ax_constraint.set_xlabel('Time [s]')
+        self.ax_constraint.set_ylabel('Constraint Margin')
+        self.ax_constraint.set_title('Constraint Margin (b-Ax)')
+        self.ax_constraint.grid(True)
+        self.constraint_line, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label='b-Ax')
+        self.ax_constraint.legend()
+        
+        # 値を記録するためのリスト
+        self.time_values = []
+        self.gamma_values = []
+        self.constraint_margin_values = []
+        self.ax_values = []
+        
+        # 最新のCBF値
+        self.cbf_values = None
         
         # 描画アーティスト
         self.drone_point = None
@@ -64,7 +97,7 @@ class SingleDroneVisualizer:
         self.zlim = (-5, 5)
         
         # 時間ステップ
-        self.dt = 0.05
+        self.dt = 0.01
         self.time = 0.0
     
     def setup_plot(self):
@@ -136,8 +169,59 @@ class SingleDroneVisualizer:
         # 軌道を更新
         self._update_trajectory()
         
+        # 安全集合と制約余裕のプロットを更新
+        self._update_safety_plots()
+        
         # 描画を更新
         self.fig.canvas.draw_idle()
+    
+    def _update_safety_plots(self):
+        """
+        安全集合と制約余裕のプロットを更新
+        """
+        # 時間を記録
+        self.time_values.append(self.time)
+        
+        # CBF値が設定されている場合
+        if self.cbf_values is not None:
+            gamma_val, constraint_margin, ax_value = self.cbf_values
+            
+            # 値を記録
+            self.gamma_values.append(gamma_val)
+            self.constraint_margin_values.append(constraint_margin)
+            self.ax_values.append(ax_value)
+        else:
+            # 値が設定されていない場合は0を記録
+            self.gamma_values.append(0)
+            self.constraint_margin_values.append(0)
+            self.ax_values.append(0)
+        
+        # プロットを更新
+        self.safety_line.set_data(self.time_values, self.gamma_values)
+        self.ax_dot_line.set_data(self.time_values, self.ax_values)
+        self.constraint_line.set_data(self.time_values, self.constraint_margin_values)
+        
+        # 軸の範囲を自動調整
+        self.ax_safety.relim()
+        self.ax_safety.autoscale_view()
+        
+        self.ax_constraint.relim()
+        self.ax_constraint.autoscale_view()
+    
+    def set_cbf_values(self, gamma_val, constraint_margin, ax_value=0.0):
+        """
+        CBF値を設定
+        
+        Parameters:
+        -----------
+        gamma_val : float
+            安全集合の値
+        constraint_margin : float
+            制約余裕の値
+        ax_value : float, optional
+            Ax値（デフォルトは0.0）
+        """
+        self.cbf_values = (gamma_val, constraint_margin, ax_value)
     
     def _update_fov(self):
         """
@@ -313,7 +397,7 @@ class SingleDroneVisualizer:
         input_func : callable, optional
             各フレームでのドローンの入力を計算する関数
             引数としてドローンとフレーム番号を取り、
-            ドローンの入力を返す必要がある
+            ドローンの入力と追加情報を返す必要がある
             
         Returns:
         --------
@@ -325,7 +409,20 @@ class SingleDroneVisualizer:
         def update(frame):
             # ドローンの入力を計算
             if input_func is not None:
-                xi = input_func(self.drone, frame)
+                result = input_func(self.drone, frame)
+                
+                # 入力関数が追加情報を返す場合
+                if isinstance(result, tuple) and len(result) >= 4:
+                    xi, gamma_val, constraint_margin, ax_value = result
+                    # CBF値を設定
+                    self.set_cbf_values(gamma_val, constraint_margin, ax_value)
+                elif isinstance(result, tuple) and len(result) >= 3:
+                    xi, gamma_val, constraint_margin = result
+                    # CBF値を設定（Ax値なし）
+                    self.set_cbf_values(gamma_val, constraint_margin)
+                else:
+                    # 追加情報がない場合は入力のみ
+                    xi = result
             else:
                 # デフォルトの入力（静止）
                 xi = np.zeros(6)
@@ -347,6 +444,9 @@ class SingleDroneVisualizer:
                 artists.append(self.target_artist)
             if self.target_line_artist is not None:
                 artists.append(self.target_line_artist)
+            artists.append(self.safety_line)
+            artists.append(self.ax_dot_line)
+            artists.append(self.constraint_line)
             
             return artists
         
@@ -360,126 +460,3 @@ class SingleDroneVisualizer:
         プロットを表示
         """
         plt.show()
-
-
-def main():
-    """
-    メイン関数
-    """
-    # コマンドライン引数の解析
-    import argparse
-    parser = argparse.ArgumentParser(description='単一ドローンのシミュレーションデモ')
-    parser.add_argument('--use-cbf', action='store_true', help='CBF制約を使用する')
-    parser.add_argument('--obstacles', type=int, default=0, help='障害物の数')
-    args = parser.parse_args()
-    
-    # ドローンの初期化（視野角を狭く設定：π/6 = 30度）
-    drone = Drone(fov_angle=np.pi/6)
-    # ドローンの初期位置を設定
-    drone.T.p = np.array([0.0, 0.0, 0.0])
-    # ドローンの初期姿勢を設定
-    initial_euler = np.array([1.0, -1.0, -2.0])
-    drone.T.R = Rotation.from_euler('xyz', initial_euler).as_matrix()
-    
-    # 特徴点の追加
-    feature_points = []
-    point_num = 5
-    
-    # 格子状に特徴点を配置
-    for x in np.linspace(-3, 3, point_num):
-        for y in np.linspace(-3, 3, point_num):
-            for z in np.linspace(-3, 3, point_num):
-                if abs(x) > 1 or abs(y) > 1 or abs(z) > 1:  # 中心付近は除外
-                    fp = FeaturePoint([x, y, z])
-                    feature_points.append(fp)
-    
-    # 障害物の追加（ランダムな位置）
-    obstacles = []
-    if args.obstacles > 0:
-        import random
-        for _ in range(args.obstacles):
-            obstacle_pos = np.array([
-                random.uniform(-3.0, 3.0),
-                random.uniform(-3.0, 3.0),
-                random.uniform(-3.0, 3.0)
-            ])
-            # 原点付近は避ける
-            if np.linalg.norm(obstacle_pos) < 1.0:
-                obstacle_pos = obstacle_pos / np.linalg.norm(obstacle_pos) * 1.0
-            obstacles.append(obstacle_pos)
-    
-    # 初期の目標位置
-    initial_target = np.array([-2.0, 2.0, 2.0])
-    
-    # 可視化の初期化（目標位置を設定）
-    visualizer = SingleDroneVisualizer(drone, feature_points, target_position=initial_target)
-    
-    # 固定目標位置
-    target_position = np.array([-2.0, 2.0, 1.5])
-    
-    # CBF制約を使用するかどうかを表示
-    if args.use_cbf:
-        print("CBF制約を使用します")
-    else:
-        print("CBF制約を使用しません")
-    
-    # 障害物の数を表示
-    if args.obstacles > 0:
-        print(f"{args.obstacles}個の障害物を追加しました")
-        for i, obs in enumerate(obstacles):
-            print(f"障害物{i+1}の位置: {obs}")
-    
-    # ドローンの入力関数（目標位置追従）
-    def drone_input_func(drone, frame):
-        # 目標位置は固定
-        visualizer.target_position = target_position
-        
-        # 目標位置に追従するための制御入力を計算
-        from cbf_se3 import compute_position_tracking_control, solve_single_drone_qp, compute_single_drone_cbf_constraints
-        
-        # 目標制御入力
-        xi_des = compute_position_tracking_control(drone, target_position, K_p=1.0, K_r=0.5)
-        
-        # CBF制約を使用する場合
-        if args.use_cbf and args.obstacles > 0:
-            # CBF制約の計算
-            cbf_constraints = compute_single_drone_cbf_constraints(
-                drone, obstacles, safety_distance=0.5, gamma=0.1)
-            
-            # CBF制約付きQPを解く
-            xi = solve_single_drone_qp(
-                drone, target_position, xi_des=xi_des, 
-                use_cbf=True, cbf_constraints=cbf_constraints)
-        else:
-            # CBF制約なしの場合は目標制御入力をそのまま使用
-            xi = xi_des
-        
-        # 10フレームごとに位置誤差を表示
-        if frame % 10 == 0:
-            position_error = np.linalg.norm(target_position - drone.T.p)
-            print(f"フレーム {frame}: 位置誤差 = {position_error:.4f}")
-            print(f"ドローン位置: {drone.T.p}, 目標位置: {target_position}")
-            
-            # 障害物との距離を表示
-            if args.obstacles > 0:
-                for i, obs in enumerate(obstacles):
-                    dist = np.linalg.norm(drone.T.p - obs)
-                    print(f"障害物{i+1}との距離: {dist:.4f}")
-        
-        return xi
-    
-    # アニメーションの作成と表示
-    num_frames = 200
-    anim = visualizer.animate(num_frames, drone_input_func)
-    
-    # アニメーションオブジェクトを保持するためのグローバル変数
-    global global_anim
-    global_anim = anim
-    
-    # アニメーションの表示
-    plt.tight_layout()
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()

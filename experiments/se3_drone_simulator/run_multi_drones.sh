@@ -5,11 +5,11 @@ FOV=30
 MIN_BARRIER=0.0
 MAX_ATTEMPTS=1000
 USE_CBF=false
-USE_NEW_CBF=false
 Q=0.5
 GAMMA=0.1
 C1=0.5
 C2=0.5
+H=0.02
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do
@@ -28,10 +28,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --use-cbf)
       USE_CBF=true
-      shift
-      ;;
-    --use-new-cbf)
-      USE_NEW_CBF=true
       shift
       ;;
     --q)
@@ -57,6 +53,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# カレントディレクトリをse3_drone_simulatorに変更
+cd se3_drone_simulator
+
 # 仮想環境をアクティベート
 source venv/bin/activate
 
@@ -66,20 +65,11 @@ if [ "$USE_CBF" = true ]; then
   CBF_FLAG="--use-cbf"
 fi
 
-NEW_CBF_FLAG=""
-if [ "$USE_NEW_CBF" = true ]; then
-  NEW_CBF_FLAG="--use-new-cbf"
-fi
-
 # 実行するコマンドを構築
-CMD="python main.py --fov $FOV --min-barrier $MIN_BARRIER --max-attempts $MAX_ATTEMPTS --q $Q --gamma $GAMMA --c1 $C1 --c2 $C2"
+CMD="python multi_drones/main.py --fov $FOV --min-barrier $MIN_BARRIER --max-attempts $MAX_ATTEMPTS --q $Q --gamma $GAMMA --c1 $C1 --c2 $C2 --h $H"
 
 if [ -n "$CBF_FLAG" ]; then
   CMD="$CMD $CBF_FLAG"
-fi
-
-if [ -n "$NEW_CBF_FLAG" ]; then
-  CMD="$CMD $NEW_CBF_FLAG"
 fi
 
 # 実行するコマンドを表示

@@ -5,9 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
-from se3 import SE3
-from drone import Drone, FeaturePoint
-from simulator import Simulator
+from utils.se3 import SE3
+from utils.drone import Drone, FeaturePoint
+from utils.simulator import Simulator
 import matplotlib.gridspec as gridspec
 
 
@@ -29,9 +29,44 @@ class Visualizer:
         """
         self.simulator = simulator
         
-        # メインの3Dシミュレーション用の図
-        self.fig_sim = plt.figure(figsize=figsize)
-        self.ax = self.fig_sim.add_subplot(111, projection='3d')
+        # メインの図を作成
+        self.fig = plt.figure(figsize=figsize)
+        
+        # グリッドレイアウトを設定
+        gs = gridspec.GridSpec(2, 2, height_ratios=[3, 1])
+        
+        # 3Dシミュレーション用のサブプロット
+        self.ax = self.fig.add_subplot(gs[0, :], projection='3d')
+        
+        # 安全集合と制約余裕用のサブプロット
+        self.ax_safety = self.fig.add_subplot(gs[1, 0])
+        self.ax_constraint = self.fig.add_subplot(gs[1, 1])
+        
+        # 安全集合のプロット設定
+        self.ax_safety.set_xlabel('Time [s]')
+        self.ax_safety.set_ylabel('Safety Value')
+        self.ax_safety.set_title('Safety Value (B) and dB/dt')
+        self.ax_safety.grid(True)
+        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label='B_{ij}')
+        self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label='dB_{ij}/dt')
+        self.ax_safety.legend()
+        
+        # 制約余裕のプロット設定
+        self.ax_constraint.set_xlabel('Time [s]')
+        self.ax_constraint.set_ylabel('Constraint Margin')
+        self.ax_constraint.set_title('Constraint Margin')
+        self.ax_constraint.grid(True)
+        self.constraint_line1, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label='constraint')
+        self.ax_constraint.legend()
+        
+        # 値を記録するためのリスト
+        self.safety_values = []
+        self.constraint_values = None
+        self.constraint_margin_values = []
+        self.ax_dot_values = []
+        self.time_values = []
+        
+        # 描画アーティスト
         self.drone_artists = []
         self.fov_artists = []
         self.feature_artists = []
@@ -43,17 +78,6 @@ class Visualizer:
         self.target_positions = []
         self.target_artists = []
         self.target_line_artists = []
-        
-        # 安全集合B_ijの時間遷移用の図
-        self.fig_safety = plt.figure(figsize=(8, 6))
-        self.ax_safety = self.fig_safety.add_subplot(111)
-        self.ax_safety.set_xlabel('Time [s]')
-        self.ax_safety.set_ylabel('Safety Value B_{ij}')
-        self.ax_safety.set_title('Safety Value B_{ij} Time Transition')
-        self.ax_safety.grid(True)
-        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2)
-        self.safety_values = []
-        self.time_values = []
         
         # ドローンの軌道を記録
         self.trajectories = [[] for _ in range(len(simulator.drones))]
@@ -151,8 +175,7 @@ class Visualizer:
         self._update_safety_plot()
         
         # 描画を更新
-        self.fig_sim.canvas.draw_idle()
-        self.fig_safety.canvas.draw_idle()
+        self.fig.canvas.draw_idle()
     
     def _update_fov(self, drone_idx, drone):
         """
@@ -342,12 +365,60 @@ class Visualizer:
         self.time_values.append(self.simulator.time)
         self.safety_values.append(safety_value)
         
+        # 制約値がある場合は記録
+        if hasattr(self, 'constraint_values') and self.constraint_values is not None:
+            alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value = self.constraint_values
+            
+            # 制約余裕の値を記録
+            if constraint_value is not None:
+                # 速度入力及び角速度入力について分解しない場合は1次元
+                if isinstance(constraint_value, np.ndarray) and constraint_value.size > 1:
+                    self.constraint_margin_values.append(constraint_value[0])
+                else:
+                    self.constraint_margin_values.append(constraint_value)
+                
+                # dB_ij/dtの値を計算（制約値から安全集合の値にgamma0を掛けた値を引く）
+                # 制約値 = dB_ij/dt + gamma0 * B_ij
+                # よって dB_ij/dt = 制約値 - gamma0 * B_ij
+                gamma0 = 0.1  # CBF制約のゲイン
+                ax_value = constraint_value - gamma0 * safety_value
+                self.ax_dot_values.append(ax_value)
+            elif len(self.constraint_margin_values) > 0:
+                # 制約余裕がない場合は前回の値を使用
+                self.constraint_margin_values.append(self.constraint_margin_values[-1])
+                if len(self.ax_dot_values) > 0:
+                    self.ax_dot_values.append(self.ax_dot_values[-1])
+                else:
+                    self.ax_dot_values.append(0)
+            else:
+                # 初めての場合は0を使用
+                self.constraint_margin_values.append(0)
+                self.ax_dot_values.append(0)
+        elif len(self.constraint_margin_values) > 0:
+            # 制約値がない場合は前回の値を使用
+            self.constraint_margin_values.append(self.constraint_margin_values[-1])
+            if len(self.ax_dot_values) > 0:
+                self.ax_dot_values.append(self.ax_dot_values[-1])
+            else:
+                self.ax_dot_values.append(0)
+        else:
+            # 初めての場合は0を使用
+            self.constraint_margin_values.append(0)
+            self.ax_dot_values.append(0)
+        
         # プロットを更新
         self.safety_line.set_data(self.time_values, self.safety_values)
+        self.ax_dot_line.set_data(self.time_values, self.ax_dot_values)
+        
+        # 制約余裕のプロットを更新
+        if len(self.constraint_margin_values) > 0:
+            self.constraint_line1.set_data(self.time_values, self.constraint_margin_values)
         
         # 軸の範囲を自動調整
         self.ax_safety.relim()
         self.ax_safety.autoscale_view()
+        self.ax_constraint.relim()
+        self.ax_constraint.autoscale_view()
     
     def _update_target_positions(self):
         """
@@ -440,11 +511,13 @@ class Visualizer:
             artists.extend(self.target_artists)
             artists.extend(self.target_line_artists)
             artists.append(self.safety_line)
+            artists.append(self.ax_dot_line)
+            artists.append(self.constraint_line1)
             
             return artists
         
         # メインのシミュレーションアニメーション
-        anim = FuncAnimation(self.fig_sim, update, frames=range(num_frames), 
+        anim = FuncAnimation(self.fig, update, frames=range(num_frames), 
                             interval=50, blit=False)
         
         return anim

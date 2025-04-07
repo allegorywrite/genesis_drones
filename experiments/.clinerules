@@ -1,11 +1,15 @@
 ### タスク
-現在の実装では目標制御入力に追従するための簡易的な実装が行われていますが，
-ccbf.mdを参照して，目標制御入力に追従するためのCBF制約付きQPを実装してください．
-CBF制約なしのQPも選択できるようにして，選択できるようにしてください．
-
-se3_drone_simulator/single_drone_demo.pyでテストしたいので，
-単機のQPを解くための関数も用意してください．
+se3_drone_simulator/multi_drones/distributed.py
+を作成し，develop.mdのIEQ-PDMMを実装してください．
+実装はse3_drone_simulator/multi_drones/main.py
+を
 
 ### 実装規則
 ・あなたは出力文字数が一定値を超えると途切れるようになっています．長い文章及びコードを出力する場合は，適宜区切り，write_in_fileではなくreplase_in_fileを用いてファイルを更新してください．
 ・実装したコードをテストして，validationが完了したことを確認してください．あらゆるエラーを排除してください．
+
+### 実行
+シングルドローン
+./se3_drone_simulator/run_single_drone.sh --use-cbf --cbf-type no-decomp --cbf-method pcl
+マルチドローン
+./se3_drone_simulator/run_multi_drones.sh --use-cbf

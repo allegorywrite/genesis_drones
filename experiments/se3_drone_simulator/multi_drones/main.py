@@ -3,15 +3,15 @@ SE(3)ドローンシミュレータのメインスクリプト
 """
 import numpy as np
 import matplotlib.pyplot as plt
-from se3 import SE3
-from drone import Drone, FeaturePoint
-from simulator import Simulator
-from visualization import Visualizer
+from utils.se3 import SE3
+from utils.drone import Drone, FeaturePoint
+from utils.simulator import Simulator
+from utils.visualization import Visualizer
 import random
 import argparse
 from scipy.spatial.transform import Rotation as R
-from cbf_se3 import compute_barrier_function, sample_safe_configuration, generate_safe_control_inputs, generate_position_tracking_control_inputs, compute_position_tracking_control
-
+from utils.cbf_se3 import sample_safe_configuration, compute_position_tracking_control
+from utils.solver import solve_direct_cbf_qp, solve_direct_qp
 
 def random_rotation_matrix():
     """
@@ -67,8 +67,6 @@ def parse_arguments():
                         help='最大試行回数（デフォルト: 1000）')
     parser.add_argument('--use-cbf', action='store_true',
                         help='Control Barrier Functionを使用するかどうか')
-    parser.add_argument('--use-new-cbf', action='store_true',
-                        help='新しいCBF実装を使用するかどうか')
     parser.add_argument('--q', type=float, default=0.5,
                         help='確率の閾値（デフォルト: 0.5）')
     parser.add_argument('--gamma', type=float, default=0.1,
@@ -77,6 +75,8 @@ def parse_arguments():
                         help='CBF制約の重み1（デフォルト: 0.5）')
     parser.add_argument('--c2', type=float, default=0.5,
                         help='CBF制約の重み2（デフォルト: 0.5）')
+    parser.add_argument('--h', type=float, default=0.1,
+                        help='時間ステップ（デフォルト: 0.01）')
     return parser.parse_args()
 
 def main():
@@ -90,7 +90,7 @@ def main():
     fov_angle_rad = np.radians(args.fov)
     
     # シミュレータの初期化
-    dt = 0.1  # 時間ステップ
+    dt = args.h
     simulator = Simulator(dt)
 
     # ドローン1: 原点、単位姿勢、指定された視野角
@@ -109,7 +109,7 @@ def main():
     # ドローン2の位置と姿勢をランダムにサンプリングし、
     # 安全集合の値が指定値以上になるまで繰り返す
     success, attempts, barrier_value = sample_safe_configuration(
-        simulator, fov_angle_rad, args.min_barrier, args.max_attempts)
+        simulator, fov_angle_rad, args.min_barrier, args.max_attempts, args.q)
     
     # 安全集合の値を表示
     if success:
@@ -125,8 +125,8 @@ def main():
     
     # 固定目標位置
     target_positions = [
-        np.array([2.0, 2.0, 1.0]),  # ドローン1の目標位置
-        np.array([-2.0, -2.0, 1.5])  # ドローン2の目標位置
+        np.array([4.0, 4.0, 4.0]),  # ドローン1の目標位置
+        np.array([-4.0, -4.0, -4.0])  # ドローン2の目標位置
     ]
     
     # 可視化の初期化（目標位置を設定）
@@ -140,41 +140,54 @@ def main():
         
         # Control Barrier Functionを使用する場合
         if args.use_cbf:
-            # 目標位置追従のための制御入力を計算
-            xi1_des = compute_position_tracking_control(sim.drones[0], p1_des, K_p=1.0)
-            xi2_des = compute_position_tracking_control(sim.drones[1], p2_des, K_p=1.0)
-            
-            # 新しいCBF実装を使用するかどうか
-            if args.use_new_cbf:
-                # 新しいCBF実装を使用
-                from cbf_se3 import solve_multi_drone_cbf_qp
-                xi1, xi2 = solve_multi_drone_cbf_qp(
-                    sim.drones[0], sim.drones[1], sim.feature_points, 
-                    xi1_des, xi2_des, q=args.q, gamma0=args.gamma, 
-                    c1=args.c1, c2=args.c2)
-                
-                print(f"新しいCBF実装を使用しています")
-            else:
-                # 既存のCBF実装を使用
-                xi1, xi2 = generate_safe_control_inputs(
-                    sim, xi1_des, xi2_des, q=args.q, gamma=args.gamma, use_new_cbf=False)
+            # 直接目標位置から制御入力を計算
+            xi1, xi2, constraint_values = solve_direct_cbf_qp(
+                sim.drones[0], sim.drones[1], sim.feature_points, 
+                p1_des, p2_des, q=args.q, gamma0=args.gamma, 
+                c1=args.c1, c2=args.c2, h=args.h)
             
             # 現在の安全集合の値と位置誤差を表示（10フレームごと）
+            # if frame % 10 == 0:
+            #     barrier_value = compute_barrier_function(
+            #         sim.drones[0], sim.drones[1], sim.feature_points, args.q)
+            #     p1_error = np.linalg.norm(p1_des - sim.drones[0].T.p)
+            #     p2_error = np.linalg.norm(p2_des - sim.drones[1].T.p)
+            #     # print(f"フレーム {frame}: 安全集合の値 = {barrier_value:.4f}")
+            #     # print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
+            #     # print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
+                
+            #     # 制約値を表示
+            #     if constraint_values is not None:
+            #         alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value = constraint_values
+            #         print(f"CBF制約値: gamma = {gamma_val:.4f}")
+            #         if constraint_value is not None:
+            #             print(f"制約余裕: {constraint_value}")
+            
+            # 制約値を可視化に渡す
+            if constraint_values is not None:
+                visualizer.constraint_values = constraint_values
+            
+            return [xi1, xi2]
+        else:
+            # CBFを使用しない場合も制約なしQPを解く
+            xi1, xi2, _ = solve_direct_qp(
+                sim.drones[0], sim.drones[1], sim.feature_points, 
+                p1_des, p2_des, h=args.h)
+            
+            # 現在の位置誤差を表示（10フレームごと）
             if frame % 10 == 0:
-                barrier_value = compute_barrier_function(
-                    sim.drones[0], sim.drones[1], sim.feature_points, args.q)
                 p1_error = np.linalg.norm(p1_des - sim.drones[0].T.p)
                 p2_error = np.linalg.norm(p2_des - sim.drones[1].T.p)
-                print(f"フレーム {frame}: 安全集合の値 = {barrier_value:.4f}")
+                print(f"フレーム {frame}: 制約なしQP")
                 print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
                 print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
             
             return [xi1, xi2]
-        else:
-            # CBFを使用しない場合は単純な位置追従制御
-            xi1 = compute_position_tracking_control(sim.drones[0], p1_des, K_p=1.0)
-            xi2 = compute_position_tracking_control(sim.drones[1], p2_des, K_p=1.0)
-            return [xi1, xi2]
+
+    # if(args.use_cbf):
+    #     print(f"CBF制約: gamma = {args.gamma:.4f}")
+    # else:
+    #     print("CBF制約: 使用しない")
 
     # アニメーションの作成と表示
     num_frames = 200
