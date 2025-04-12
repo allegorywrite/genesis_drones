@@ -36,6 +36,7 @@ class SingleDroneVisualizer:
         self.drone = drone
         self.feature_points = feature_points
         self.target_position = target_position
+        self.target_trajectory = None  # 目標軌道
         
         # メインの図を作成
         self.fig = plt.figure(figsize=figsize)
@@ -98,16 +99,17 @@ class SingleDroneVisualizer:
         # 現在のフレーム番号
         self.current_frame = 0
         
-        # 目標位置の描画アーティスト
+        # 目標位置と軌道の描画アーティスト
         self.target_artist = None
         self.target_line_artist = None
+        self.target_trajectory_artist = None
         
         # ドローンの軌道を記録
         self.trajectory = []
         
         # ドローンの色(黒)
-        # self.drone_color = 'b'
-        self.drone_color = 'k'
+        self.drone_color = 'cornflowerblue'
+        # self.drone_color = 'k'
         
         # 描画範囲
         self.xlim = (-5, 5)
@@ -394,6 +396,28 @@ class SingleDroneVisualizer:
         # 時間を進める
         self.time += self.dt
     
+    def set_target_trajectory(self, trajectory):
+        """
+        目標軌道を設定
+        
+        Parameters:
+        -----------
+        trajectory : array_like, shape (n, 3)
+            目標軌道の点列
+        """
+        self.target_trajectory = trajectory
+    
+    def update_target_position(self, position):
+        """
+        目標位置を更新
+        
+        Parameters:
+        -----------
+        position : array_like, shape (3,)
+            新しい目標位置
+        """
+        self.target_position = position
+    
     def _update_target_position(self):
         """
         目標位置の描画を更新
@@ -424,6 +448,15 @@ class SingleDroneVisualizer:
             [drone_pos[2], self.target_position[2]],
             '--', color='r', alpha=0.5
         )[0]
+        
+        # 目標軌道全体を描画（初回のみ）
+        if self.target_trajectory is not None and self.target_trajectory_artist is None:
+            self.target_trajectory_artist = self.ax.plot(
+                self.target_trajectory[:, 0],
+                self.target_trajectory[:, 1],
+                self.target_trajectory[:, 2],
+                '-', color='gold', alpha=1.0, linewidth=3
+            )[0]
         
     def animate(self, num_frames, input_func=None):
         """
@@ -487,6 +520,8 @@ class SingleDroneVisualizer:
                 artists.append(self.target_artist)
             if self.target_line_artist is not None:
                 artists.append(self.target_line_artist)
+            if self.target_trajectory_artist is not None:
+                artists.append(self.target_trajectory_artist)
             artists.append(self.safety_line)
             artists.append(self.ax_dot_line)
             artists.append(self.constraint_line)
@@ -494,7 +529,7 @@ class SingleDroneVisualizer:
             return artists
         
         anim = FuncAnimation(self.fig, update, frames=range(num_frames), 
-                            interval=50, blit=False)
+                            interval=50, blit=False, repeat=False)
         
         return anim
     

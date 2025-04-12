@@ -1,0 +1,12 @@
+実行: python -m single_drone.single_drone_demo --use-cbf --cbf-type no-decomp --cbf-method pcl --keep-fov-history --fov-save-interval 30 --trajectory-type snake_perpendicular
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/initial/colcon_ws/src/genesis_drones/experiments/se3_drone_simulator/single_drone/single_drone_demo.py", line 252, in <module>
+    main()
+  File "/home/initial/colcon_ws/src/genesis_drones/experiments/se3_drone_simulator/single_drone/single_drone_demo.py", line 175, in main
+    target_trajectory = generate_target_trajectory(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/initial/colcon_ws/src/genesis_drones/experiments/se3_drone_simulator/single_drone/single_drone_demo.py", line 125, in generate_target_trajectory
+    raise ValueError(f"不明な軌道タイプ: {trajectory_type}")
+ValueError: 不明な軌道タイプ: snake_perpendicular

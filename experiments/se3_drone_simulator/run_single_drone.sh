@@ -6,7 +6,8 @@ CBF_TYPE="no-decomp"
 CBF_METHOD="pcl"
 OBSTACLES=0
 KEEP_FOV_HISTORY=false
-FOV_SAVE_INTERVAL=50
+FOV_SAVE_INTERVAL=30
+TRAJECTORY_TYPE="circle"
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fov-save-interval)
       FOV_SAVE_INTERVAL="$2"
+      shift 2
+      ;;
+    --trajectory-type)
+      TRAJECTORY_TYPE="$2"
       shift 2
       ;;
     *)
@@ -62,7 +67,7 @@ if [ "$KEEP_FOV_HISTORY" = true ]; then
   CMD="$CMD --keep-fov-history"
 fi
 
-CMD="$CMD --fov-save-interval $FOV_SAVE_INTERVAL"
+CMD="$CMD --fov-save-interval $FOV_SAVE_INTERVAL --trajectory-type $TRAJECTORY_TYPE"
 
 # 実行するコマンドを表示
 echo "実行: $CMD"

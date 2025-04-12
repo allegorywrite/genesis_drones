@@ -40,7 +40,7 @@ def compute_objective_coefficients(drone, p_des, Q1=None, Q2=None, h=0.01):
     if Q1 is None:
         Q1 = np.eye(3)
     if Q2 is None:
-        Q2 = np.eye(6)*0.01
+        Q2 = np.eye(6)*0.0005
         # Q2 = np.zeros((6, 6))
         # Q2[:3, :3] = np.eye(3)*0.0001
         # Q2[3:, 3:] = np.eye(3)*0.01

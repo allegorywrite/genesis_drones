@@ -10,7 +10,7 @@ class Drone:
     SE(3)上のドローンモデル
     """
     
-    def __init__(self, T=None, camera_direction=None, fov_angle=np.pi/3):
+    def __init__(self, T=None, camera_direction=None, fov_angle=np.pi/3, R=None, p=None):
         """
         ドローンを初期化
         
@@ -24,7 +24,7 @@ class Drone:
             カメラの視野角（デフォルトはπ/3ラジアン）
         """
         if T is None:
-            self.T = SE3()
+            self.T = SE3(R=np.eye(3), p=np.zeros(3))
         else:
             self.T = T
             

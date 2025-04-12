@@ -12,7 +12,7 @@ from utils.cbf_se3 import compute_position_tracking_control, compute_single_dron
 from utils.solver import compute_objective_coefficients
 
 
-def create_drone_input_func(drone, feature_points, target_position, use_cbf=False, cbf_type='no-decomp', cbf_method='pcl'):
+def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=False, cbf_type='no-decomp', cbf_method='pcl'):
     """
     ドローンの入力関数を作成
     
@@ -22,8 +22,8 @@ def create_drone_input_func(drone, feature_points, target_position, use_cbf=Fals
         ドローン
     feature_points : list of FeaturePoint
         特徴点のリスト
-    target_position : array_like, shape (3,)
-        目標位置
+    target_trajectory : array_like, shape (n, 3) or array_like, shape (3,)
+        目標軌道または固定目標位置
     use_cbf : bool, optional
         CBF制約を使用するかどうか（デフォルトはFalse）
     cbf_type : str, optional
@@ -38,9 +38,18 @@ def create_drone_input_func(drone, feature_points, target_position, use_cbf=Fals
     input_func : callable
         ドローンの入力関数
     """
+    # 目標軌道かどうかを判定
+    is_trajectory = isinstance(target_trajectory, np.ndarray) and len(target_trajectory.shape) == 2
+    
     def drone_input_func(drone, frame):
+        # 現在のフレームに対応する目標位置を取得
+        if is_trajectory:
+            current_target = target_trajectory[frame % len(target_trajectory)]
+        else:
+            current_target = target_trajectory
+        
         # 目標制御入力
-        xi_des = compute_position_tracking_control(drone, target_position, K_p=1.0, K_r=0.5)
+        xi_des = compute_position_tracking_control(drone, current_target, K_p=1.0, K_r=0.5)
         
         # 返却値の初期化
         gamma_val = 0.0
@@ -58,7 +67,7 @@ def create_drone_input_func(drone, feature_points, target_position, use_cbf=Fals
             # 視野内の特徴点がない場合は制約なしQPを解く
             if not visible_features:
                 print("警告: 視野内に特徴点がありません")
-                H, f = compute_objective_coefficients(drone, target_position)
+                H, f = compute_objective_coefficients(drone, current_target)
                 # cvxoptの形式に変換
                 P = cvxopt.matrix(H)
                 q = cvxopt.matrix(f)
@@ -95,7 +104,7 @@ def create_drone_input_func(drone, feature_points, target_position, use_cbf=Fals
                 # print(f"gamma: {gamma}")
                 
                 # 目的関数の係数を計算
-                H, f = compute_objective_coefficients(drone, target_position)
+                H, f = compute_objective_coefficients(drone, current_target)
                 
                 # 安全集合の値が既に負の場合は、制約なしQPを解く
                 if gamma <= 0:
@@ -219,7 +228,7 @@ def create_drone_input_func(drone, feature_points, target_position, use_cbf=Fals
                             print(f"警告: QP問題の解決中にエラーが発生しました: {e}")
                             xi = xi_des
         else:
-            H, f = compute_objective_coefficients(drone, target_position)
+            H, f = compute_objective_coefficients(drone, current_target)
             # cvxoptの形式に変換
             P = cvxopt.matrix(H)
             q = cvxopt.matrix(f)

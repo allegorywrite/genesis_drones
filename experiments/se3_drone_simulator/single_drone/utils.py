@@ -72,7 +72,7 @@ def setup_drone_initial_pose(drone, feature_area_center):
         設定された初期回転行列
     """
     # 初期位置は原点から少し離れた位置
-    initial_position = np.array([-3.0, 0.0, 0.0])
+    initial_position = np.array([0.0, -5.0, 0.0])
     
     # 特徴点の中心方向を向くように姿勢を設定
     direction_to_features = feature_area_center - initial_position

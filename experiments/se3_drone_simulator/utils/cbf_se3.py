@@ -37,6 +37,10 @@ def sample_safe_configuration(simulator, fov_angle, min_barrier_value=0.0, max_a
         raise ValueError("ドローン1がシミュレータに追加されていません")
     
     drone1 = simulator.drones[0]
+    p_initial = np.array([4.0, 4.0, 4.0])
+    R_initial = R.from_euler('xyz', [1.0, -1.0, 0.0]).as_matrix()
+
+    drone1.T = SE3(R=R_initial, p=p_initial)
     
     # ランダムな回転行列を生成する関数
     def random_rotation_matrix():
@@ -61,7 +65,7 @@ def sample_safe_configuration(simulator, fov_angle, min_barrier_value=0.0, max_a
         
         # ドローン2: ランダムな位置と姿勢、指定された視野角
         rot_matrix = random_rotation_matrix()
-        position = random_position(min_val=-3.0, max_val=3.0)
+        position = random_position(min_val=-5.0, max_val=-3.0)
         
         # 位置が原点に近すぎる場合は調整（ドローン1と重ならないように）
         if np.linalg.norm(position) < 1.0:

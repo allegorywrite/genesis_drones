@@ -99,7 +99,8 @@ class Visualizer:
         self.trajectories = [[] for _ in range(len(simulator.drones))]
         
         # ドローンの色
-        self.drone_colors = ['r', 'b', 'g', 'c', 'm', 'y']
+        # self.drone_colors = ['r', 'b', 'g', 'c', 'm', 'y']
+        self.drone_colors = ['royalblue', 'crimson']
         
         # 描画範囲
         self.xlim = (-5, 5)
@@ -211,8 +212,8 @@ class Visualizer:
         
         # 視野角の描画パラメータ
         color = self.drone_colors[drone_idx % len(self.drone_colors)]
-        alpha = 0.3
-        h = 3.0  # 円錐の高さ
+        alpha = 0.8
+        h = 2.0  # 円錐の高さ
         
         # カメラの向きを取得
         p = drone.T.p
@@ -274,7 +275,7 @@ class Visualizer:
             
             # 底面の円を描画（薄い色で）
             saved_circle = self.ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2], 
-                                      color=color, alpha=alpha*0.5)[0]
+                                      color=color, alpha=alpha)[0]
             saved_fov_artists.append(saved_circle)
             
             # 頂点から円周への線分を描画（薄い色で）
@@ -282,7 +283,7 @@ class Visualizer:
                 saved_line = self.ax.plot([apex[0], circle_points[i, 0]], 
                                         [apex[1], circle_points[i, 1]], 
                                         [apex[2], circle_points[i, 2]], 
-                                        color=color, alpha=alpha*0.5)[0]
+                                        color=color, alpha=alpha)[0]
                 saved_fov_artists.append(saved_line)
             
             # 保存した視野錐台をリストに追加
@@ -308,14 +309,23 @@ class Visualizer:
             trajectory_points = np.array(trajectory)
             
             # 軌道を描画
+            # trajectory_artist = self.ax.plot(
+            #     trajectory_points[:, 0],
+            #     trajectory_points[:, 1],
+            #     trajectory_points[:, 2],
+            #     '--',  # 破線
+            #     color=color,
+            #     alpha=0.5,
+            #     linewidth=1
+            # )[0]
             trajectory_artist = self.ax.plot(
                 trajectory_points[:, 0],
                 trajectory_points[:, 1],
                 trajectory_points[:, 2],
-                '--',  # 破線
+                '-',  # 破線
                 color=color,
-                alpha=0.5,
-                linewidth=1
+                alpha=0.8,
+                linewidth=4
             )[0]
             
             self.trajectory_artists.append(trajectory_artist)
@@ -384,7 +394,7 @@ class Visualizer:
         for idx in cofov_indices:
             fp = self.simulator.feature_points[idx]
             cofov_point = self.ax.scatter([fp.position[0]], [fp.position[1]], [fp.position[2]], 
-                                         color='y', s=100, alpha=0.7)
+                                         color='g', s=100, alpha=0.7)
             self.cofov_artists.append(cofov_point)
     
     def _update_safety_plot(self):
