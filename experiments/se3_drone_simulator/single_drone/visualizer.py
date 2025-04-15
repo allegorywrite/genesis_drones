@@ -14,7 +14,7 @@ class SingleDroneVisualizer:
     """
     
     def __init__(self, drone, feature_points, target_position=None, figsize=(12, 10), 
-                 keep_fov_history=False, fov_save_interval=10):
+                 keep_fov_history=False, fov_save_interval=10, dt=0.01):
         """
         可視化を初期化
         
@@ -50,22 +50,30 @@ class SingleDroneVisualizer:
         # 安全集合と制約余裕用のサブプロット
         self.ax_safety = self.fig.add_subplot(gs[1, 0])
         self.ax_constraint = self.fig.add_subplot(gs[1, 1])
+
+        # TeXの基本フォントに似たフォント設定
+        # plt.rcParams["text.usetex"] = True
+        # plt.rcParams["font.family"] = "serif"
+        # plt.rcParams["font.serif"] = ["Computer Modern Roman"]
+        # plt.rcParams["font.size"] = 12
+        # plt.rcParams['axes.unicode_minus'] = False
         
         # 安全集合のプロット設定
         self.ax_safety.set_xlabel('Time [s]')
         self.ax_safety.set_ylabel('Safety Value')
-        self.ax_safety.set_title('Safety Value (B) and dB/dt')
+        # self.ax_safety.set_title(r'Safety Value $(B, \dot B+\gamma_0 B)$')
+        self.ax_safety.set_title(r'Safety Value $(B_i \geq 0)$')
         self.ax_safety.grid(True)
-        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label='B')
-        self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label='dB/dt')
+        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label=r'$B_i$')
+        # self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label=r'$\dot B+\gamma_0 B$')
         self.ax_safety.legend()
         
         # 制約余裕のプロット設定
         self.ax_constraint.set_xlabel('Time [s]')
-        self.ax_constraint.set_ylabel('Constraint Margin')
-        self.ax_constraint.set_title('Constraint Margin (b-Ax)')
+        self.ax_constraint.set_ylabel(r'$b-A\xi_i$')
+        self.ax_constraint.set_title(r'Constraint Margin $(b-A\xi_i\geq 0)$')
         self.ax_constraint.grid(True)
-        self.constraint_line, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label='b-Ax')
+        self.constraint_line, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label=r'$b-A\xi_i$')
         self.ax_constraint.legend()
         
         # 値を記録するためのリスト
@@ -117,7 +125,7 @@ class SingleDroneVisualizer:
         self.zlim = (-5, 5)
         
         # 時間ステップ
-        self.dt = 0.01
+        self.dt = dt
         self.time = 0.0
     
     def setup_plot(self):
@@ -205,6 +213,7 @@ class SingleDroneVisualizer:
         # CBF値が設定されている場合
         if self.cbf_values is not None:
             gamma_val, constraint_margin, ax_value = self.cbf_values
+            # print(f"CBF: gamma={gamma_val}, margin={constraint_margin}, ax={ax_value}")
             
             # 値を記録
             self.gamma_values.append(gamma_val)
@@ -218,7 +227,7 @@ class SingleDroneVisualizer:
         
         # プロットを更新
         self.safety_line.set_data(self.time_values, self.gamma_values)
-        self.ax_dot_line.set_data(self.time_values, self.ax_values)
+        # self.ax_dot_line.set_data(self.time_values, self.ax_values)
         self.constraint_line.set_data(self.time_values, self.constraint_margin_values)
         
         # 軸の範囲を自動調整
@@ -485,9 +494,18 @@ class SingleDroneVisualizer:
             # ドローンの入力を計算
             if input_func is not None:
                 result = input_func(self.drone, frame)
+
+                if result is None:
+                    return
                 
                 # 入力関数が追加情報を返す場合
-                if isinstance(result, tuple) and len(result) >= 4:
+                if isinstance(result, tuple) and len(result) >= 7:
+                    # 2次系モデルの場合（7つの値を返す）
+                    xi, ref1_value, constraint_margin, ref2_value, B_val, B_dot_val, B_ddot_val = result
+                    # CBF値を設定
+                    self.set_cbf_values(B_val, constraint_margin, ref1_value)
+                elif isinstance(result, tuple) and len(result) >= 4:
+                    # 1次系モデルの場合（4つの値を返す）
                     xi, gamma_val, constraint_margin, ax_value = result
                     # CBF値を設定
                     self.set_cbf_values(gamma_val, constraint_margin, ax_value)
@@ -523,7 +541,7 @@ class SingleDroneVisualizer:
             if self.target_trajectory_artist is not None:
                 artists.append(self.target_trajectory_artist)
             artists.append(self.safety_line)
-            artists.append(self.ax_dot_line)
+            # artists.append(self.ax_dot_line)
             artists.append(self.constraint_line)
             
             return artists

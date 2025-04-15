@@ -11,22 +11,26 @@ import os
 # 親ディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.drone import Drone
+from utils.constants import set_gravity
 
 # 同じディレクトリ内のモジュール
 from .visualizer import SingleDroneVisualizer
 from .controller import create_drone_input_func
 from .utils import generate_feature_points, setup_drone_initial_pose
-
+from utils.drone import FeaturePoint
+from .hocbf_visualizer import HOCBFVisualizer
+from utils.drone import DynamicDrone
+from utils.se3 import SE3
 
 def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0.0, 0.0]), 
-                              radius=3.0, period=10.0, num_frames=200):
+                              radius=3.0, period=10.0, num_frames=500):
     """
     目標軌道を生成する
     
     Parameters:
     -----------
     trajectory_type : str, optional
-        軌道の種類（'circle', 'eight', 'lissajous', 'snake', 'snake_3d'）（デフォルトは'circle'）
+        軌道の種類（'circle', 'eight', 'lissajous', 'snake', 'snake_3d', 'step'）（デフォルトは'circle'）
     center : array_like, shape (3,), optional
         軌道の中心位置（デフォルトは[0.0, 0.0, 0.0]）
     radius : float, optional
@@ -122,6 +126,14 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         trajectory[:, 0] += amplitude * np.sin(2 * np.pi * freq * t)
         trajectory[:, 2] += amplitude * np.cos(2 * np.pi * freq * t)    
         
+    elif trajectory_type == 'step':
+        # [0, 0, 1]に固定された目標位置
+        fixed_target = np.array([0.0, 0.0, 3.0])
+        
+        # すべてのフレームで同じ目標位置
+        for i in range(num_frames):
+            trajectory[i] = fixed_target
+        
     else:
         raise ValueError(f"不明な軌道タイプ: {trajectory_type}")
     
@@ -143,8 +155,12 @@ def main():
     parser.add_argument('--obstacles', type=int, default=0, help='障害物の数')
     parser.add_argument('--keep-fov-history', action='store_true', help='過去の視野錐台描画を残す')
     parser.add_argument('--fov-save-interval', type=int, default=10, help='視野錐台を保存する間隔（フレーム数）')
-    parser.add_argument('--trajectory-type', type=str, choices=['circle', 'eight', 'lissajous', 'snake', 'snake_3d'], default='circle',
-                        help='目標軌道の種類: circle (円軌道), eight (8の字軌道), lissajous (リサージュ曲線), snake (蛇行軌道), snake_2d (X-Y平面のみの蛇行軌道), snake_simple (単純なサイン波軌道), snake_perpendicular (進行方向に垂直な周波数成分)')
+    parser.add_argument('--trajectory-type', type=str, choices=['circle', 'eight', 'lissajous', 'snake', 'snake_3d', 'step'], default='circle',
+                        help='目標軌道の種類: circle (円軌道), eight (8の字軌道), lissajous (リサージュ曲線), snake (蛇行軌道), snake_3d (3D蛇行軌道), step ([0,0,1]に固定)')
+    parser.add_argument('--dynamics-model', type=str, choices=['kinematics', 'dynamics', 'holonomic_dynamics'], default='kinematics',
+                        help='動力学モデル: kinematics (1次系), dynamics (2次系), または holonomic_dynamics (ホロノミック2次系)')
+    parser.add_argument('--gravity', type=float, nargs=3, default=[0, 0, 9.81], help='重力加速度ベクトル [x, y, z]（デフォルトは[0, 0, 9.81]）')
+    parser.add_argument('--dt', type=float, default=0.01, help='時間ステップ')
     args = parser.parse_args()
     
     # 特徴点の追加（より局在化された配置）
@@ -159,15 +175,26 @@ def main():
     # CBFメソッドが'point'の場合は、最初の特徴点のみを使用
     if args.use_cbf and args.cbf_method == 'point':
         # 最も中心に近い特徴点を選択
-        closest_feature_idx = np.argmin([np.linalg.norm(fp.position - feature_area_center) for fp in feature_points])
-        feature_points = [feature_points[closest_feature_idx]]
+        # closest_feature_idx = np.argmin([np.linalg.norm(fp.position - feature_area_center) for fp in feature_points])
+        # feature_points = [feature_points[closest_feature_idx]]
+        feature_points = [FeaturePoint(position=np.array([0.0, 3.0, 0.0]))]
         print(f"単一特徴点モード: 特徴点位置 = {feature_points[0].position}")
     
-    # ドローンの初期化（視野角を設定：π/8 = 45度）
-    drone = Drone(fov_angle=np.pi/8, R=np.eye(3))
+    # 重力加速度を設定
+    gravity = np.array(args.gravity)
+    set_gravity(gravity)
     
-    # 初期位置と姿勢を特徴点が視野内に入るように設定
-    setup_drone_initial_pose(drone, feature_area_center)
+    # 動力学モデルに応じてドローンを初期化
+    if args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics':
+        camera_direction = np.array([0, 1, 0])
+        T = SE3(R=np.eye(3), p=np.array([0.0, 0.0, 0.0]))
+        drone = DynamicDrone(fov_angle=np.pi/6, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
+        print("2次系モデル（動力学モデル）を使用します")
+    else:
+        drone = Drone(fov_angle=np.pi/6)
+        print("1次系モデル（運動学モデル）を使用します")
+        # 初期位置と姿勢を特徴点が視野内に入るように設定
+        setup_drone_initial_pose(drone, feature_area_center)
     
     # フレーム数
     num_frames = 200
@@ -186,11 +213,12 @@ def main():
     
     # 可視化の初期化（目標位置を設定）
     visualizer = SingleDroneVisualizer(
-        drone, 
-        feature_points, 
+        drone,
+        feature_points,
         target_position=target_position,
         keep_fov_history=args.keep_fov_history,
-        fov_save_interval=args.fov_save_interval
+        fov_save_interval=args.fov_save_interval,
+        dt=args.dt
     )
     
     # 目標軌道全体を可視化
@@ -202,6 +230,12 @@ def main():
     else:
         print("CBF制約を使用しません")
     
+    # HOCBFの可視化（2次系モデルの場合のみ）
+    hocbf_visualizer = None
+    if args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics':
+        hocbf_visualizer = HOCBFVisualizer()
+        hocbf_visualizer.show()
+    
     # ドローンの入力関数を作成
     drone_input_func = create_drone_input_func(
         drone,
@@ -209,7 +243,10 @@ def main():
         target_trajectory,  # 目標軌道を渡す
         use_cbf=args.use_cbf,
         cbf_type=args.cbf_type,
-        cbf_method=args.cbf_method
+        cbf_method=args.cbf_method,
+        dynamics_model=args.dynamics_model,
+        hocbf_visualizer=hocbf_visualizer,
+        dt=args.dt
     )
     
     # 軌道追従が完了したかどうかのフラグ
@@ -221,13 +258,25 @@ def main():
         
         # 軌道追従が既に完了している場合は停止状態を維持
         if trajectory_completed:
-            return np.zeros(6), 0.0, 0.0, 0.0  # 停止状態の入力と値を返す
+            return None
+            # if args.dynamics_model == 'dynamics':
+            #     return np.zeros(4), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（2次系）
+            # elif args.dynamics_model == 'holonomic_dynamics':
+            #     return np.zeros(6), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（ホロノミック2次系）
+            # else:
+            #     return np.zeros(6), 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（1次系）
         
         # 軌道の終了判定（最後のフレームに達したら停止）
         if frame >= len(target_trajectory) - 20:
             print(f"フレーム {frame} で軌道追従が完了しました。更新を停止します。")
             trajectory_completed = True  # 軌道追従完了フラグを設定
-            return np.zeros(6), 0.0, 0.0, 0.0  # 停止状態の入力と値を返す
+            return None
+            # if args.dynamics_model == 'dynamics':
+            #     return np.zeros(4), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（2次系）
+            # elif args.dynamics_model == 'holonomic_dynamics':
+            #     return np.zeros(6), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（ホロノミック2次系）
+            # else:
+            #     return np.zeros(6), 0.0, 0.0, 0.0  # 停止状態の入力と値を返す（1次系）
         
         # 現在のフレームに対応する目標位置を設定
         current_target = target_trajectory[frame]
@@ -235,7 +284,13 @@ def main():
         
         # 入力関数を呼び出し
         result = drone_input_func(drone, frame)
-        return result  # (xi, gamma_val, constraint_margin)を返す
+        
+        # 2次系モデルの場合は、HOCBFの可視化に必要なデータを含む
+        if (args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics') and len(result) >= 7:
+            xi, gamma_val, constraint_margin, ax_value, h_val, h_dot_val, h_ddot_val = result
+            return xi, gamma_val, constraint_margin, ax_value
+        else:
+            return result  # (xi, gamma_val, constraint_margin, ax_value)を返す
     
     # アニメーションの作成と表示（repeat=Falseで繰り返しを防止）
     anim = visualizer.animate(num_frames, wrapped_input_func)

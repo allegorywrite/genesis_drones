@@ -7,7 +7,9 @@ CBF_METHOD="pcl"
 OBSTACLES=0
 KEEP_FOV_HISTORY=false
 FOV_SAVE_INTERVAL=30
-TRAJECTORY_TYPE="circle"
+TRAJECTORY_TYPE="snake"
+DYNAMICS_MODEL="kinematics"  # 追加: 動力学モデル（kinematics, dynamics, または holonomic_dynamics）
+GRAVITY="0 0 0"  # 追加: 重力加速度ベクトル [x, y, z]
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do
@@ -40,6 +42,14 @@ while [[ $# -gt 0 ]]; do
       TRAJECTORY_TYPE="$2"
       shift 2
       ;;
+    --dynamics-model)  # 追加: 動力学モデルオプション
+      DYNAMICS_MODEL="$2"
+      shift 2
+      ;;
+    --gravity)  # 追加: 重力加速度ベクトルオプション
+      GRAVITY="$2 $3 $4"
+      shift 4
+      ;;
     *)
       echo "不明な引数: $1"
       exit 1
@@ -67,7 +77,7 @@ if [ "$KEEP_FOV_HISTORY" = true ]; then
   CMD="$CMD --keep-fov-history"
 fi
 
-CMD="$CMD --fov-save-interval $FOV_SAVE_INTERVAL --trajectory-type $TRAJECTORY_TYPE"
+CMD="$CMD --fov-save-interval $FOV_SAVE_INTERVAL --trajectory-type $TRAJECTORY_TYPE --dynamics-model $DYNAMICS_MODEL --gravity $GRAVITY"
 
 # 実行するコマンドを表示
 echo "実行: $CMD"

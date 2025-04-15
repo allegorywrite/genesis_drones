@@ -8,17 +8,111 @@ import os
 
 # 親ディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.cbf_se3 import compute_position_tracking_control, compute_single_drone_cbf_coefficients, compute_single_point_cbf_coefficients, compute_single_prob_cbf_coefficients
-from utils.solver import compute_objective_coefficients
+from utils.cbf_se3 import compute_position_tracking_control, compute_single_drone_cbf_coefficients, compute_single_point_cbf_coefficients, compute_single_prob_cbf_coefficients, compute_position_tracking_acceleration_control, compute_hocbf_single_point_coefficients
+from utils.solver import compute_objective_coefficients, compute_dynamic_objective_coefficients, solve_dynamic_qp
+from utils.drone import DynamicDrone
 
 
-def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=False, cbf_type='no-decomp', cbf_method='pcl'):
+def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, use_cbf=False, cbf_method='point', hocbf_visualizer=None, dt=0.01):
+    """
+    2次系ドローンの入力関数を作成
+    
+    Parameters:
+    -----------
+    drone : DynamicDrone
+        2次系ドローン
+    feature_points : list of FeaturePoint
+        特徴点のリスト
+    target_trajectory : array_like, shape (n, 3) or array_like, shape (3,)
+        目標軌道または固定目標位置
+    use_cbf : bool, optional
+        CBF制約を使用するかどうか（デフォルトはFalse）
+    cbf_method : str, optional
+        CBF制約の方法: 'point'（単一特徴点に対するCBF）（デフォルトは'point'）
+        注: 2次系モデルでは現在、単一特徴点のみサポート
+    hocbf_visualizer : HOCBFVisualizer, optional
+        HOCBFの可視化クラス（デフォルトはNone）
+    
+    Returns:
+    --------
+    input_func : callable
+        ドローンの入力関数
+    """
+    # 目標軌道かどうかを判定
+    is_trajectory = isinstance(target_trajectory, np.ndarray) and len(target_trajectory.shape) == 2
+    
+    def drone_input_func(drone, frame):
+        # 現在のフレームに対応する目標位置を取得
+        if is_trajectory:
+            current_target = target_trajectory[frame % len(target_trajectory)]
+        else:
+            current_target = target_trajectory
+        
+        # 返却値の初期化
+        gamma_val = 0.0
+        constraint_margin = 0.0
+        ax_value_float = 0.0
+        h_val = 0.0
+        h_dot_val = 0.0
+        h_ddot_val = 0.0
+        
+        # CBF制約を使用する場合
+        if use_cbf:
+            # 特徴点の中で視野内にあるものを取得
+            visible_features = []
+            for fp in feature_points:
+                if drone.is_point_visible(fp.position):
+                    visible_features.append(fp)
+            
+            # 視野内の特徴点がない場合は制約なしQPを解く
+            if not visible_features:
+                print("警告: 視野内に特徴点がありません")
+                # 目標位置追従のための制御入力を計算
+                u_des = compute_position_tracking_acceleration_control(drone, current_target)
+                return u_des, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+            
+            # 単一特徴点に対するHOCBF
+            feature = visible_features[0]
+            
+            # HOCBFのゲイン
+            gamma0 = 0.1
+            gamma1 = 0.1
+            
+            # QP問題を解く
+            u, constraint_value, B_val, B_dot_val, B_ddot_val = solve_dynamic_qp(
+                drone, feature, current_target, use_cbf=True, 
+                gamma0=gamma0, gamma1=gamma1
+            )
+
+            if constraint_value is not None:
+                constraint_margin = constraint_value
+            
+            if hocbf_visualizer is not None and B_val is not None and B_dot_val is not None and B_ddot_val is not None:
+                _, B_dot_prev, _ = hocbf_visualizer.get_previous_values()
+                ref1_value = (B_dot_val - B_dot_prev) / dt
+                ref2_value = B_ddot_val
+                hocbf_visualizer.update(B_val, B_dot_val, B_ddot_val, gamma0, gamma1)
+                return u, ref1_value, constraint_margin, ref2_value, B_val, B_dot_val, B_ddot_val
+            
+            # HOCBFの可視化がない場合、またはB_val, B_dot_val, B_ddot_valがNoneの場合
+            return u, 0.0, constraint_margin, 0.0, 0.0, 0.0, 0.0
+        else:
+            # 制約なしの場合も制約なしQPを解く
+            u, _, _, _, _ = solve_dynamic_qp(
+                drone, None, current_target, use_cbf=False, h=dt
+            )
+            return u, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    
+    return drone_input_func
+
+
+def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=False, cbf_type='no-decomp', cbf_method='pcl', dynamics_model='kinematics', hocbf_visualizer=None, dt=0.01):
     """
     ドローンの入力関数を作成
     
     Parameters:
     -----------
-    drone : Drone
+    drone : Drone or DynamicDrone
         ドローン
     feature_points : list of FeaturePoint
         特徴点のリスト
@@ -32,12 +126,22 @@ def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=Fa
     cbf_method : str, optional
         CBF制約の方法: 'pcl'（複数特徴点に対するCBF）または
         'point'（単一特徴点に対するCBF）（デフォルトは'pcl'）
+    dynamics_model : str, optional
+        動力学モデル: 'kinematics'（1次系）または'dynamics'（2次系）または
+        'holonomic_dynamics'（ホロノミック2次系）（デフォルトは'kinematics'）
+    hocbf_visualizer : HOCBFVisualizer, optional
+        HOCBFの可視化クラス（デフォルトはNone）
     
     Returns:
     --------
     input_func : callable
         ドローンの入力関数
     """
+    # 動力学モデルに応じて適切な入力関数を返す
+    if (dynamics_model == 'dynamics' or dynamics_model == 'holonomic_dynamics') and isinstance(drone, DynamicDrone):
+        # ドローンの動力学モデルを設定
+        drone.dynamics_model = dynamics_model
+        return create_dynamic_drone_input_func(drone, feature_points, target_trajectory, use_cbf, cbf_method, hocbf_visualizer, dt=dt)
     # 目標軌道かどうかを判定
     is_trajectory = isinstance(target_trajectory, np.ndarray) and len(target_trajectory.shape) == 2
     
@@ -88,20 +192,14 @@ def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=Fa
                 if cbf_method == 'pcl':
                     # 複数特徴点に対するCBF
                     alpha_omega, alpha_v, gamma = compute_single_drone_cbf_coefficients(drone, visible_features, q=0.5)
-                    # alpha_omega, alpha_v, gamma = compute_single_prob_cbf_coefficients(drone, visible_features[0], q=0.5)
                 else:  # cbf_method == 'point'
                     # 単一特徴点に対するCBF
                     feature = visible_features[0]
                     alpha_omega, alpha_v, gamma = compute_single_point_cbf_coefficients(drone, feature, d=1.0)
-                    print(f"CBF: point, gamma={gamma}")
+                    # print(f"CBF: point, gamma={gamma}")
                 
                 # gamma値を保存
                 gamma_val = gamma
-                
-                # デバッグ出力
-                # print(f"alpha_omega: {alpha_omega}")
-                # print(f"alpha_v: {alpha_v}")
-                # print(f"gamma: {gamma}")
                 
                 # 目的関数の係数を計算
                 H, f = compute_objective_coefficients(drone, current_target)
@@ -126,7 +224,7 @@ def create_drone_input_func(drone, feature_points, target_trajectory, use_cbf=Fa
                         xi = xi_des
                 else:
                     # CBFのゲイン
-                    gamma0 = 0.01
+                    gamma0 = 5.0
                     
                     # CBF制約のタイプに応じて処理を分岐
                     if cbf_type == 'no-decomp':

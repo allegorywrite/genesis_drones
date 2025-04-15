@@ -2,7 +2,9 @@
 ドローンのモデルを実装するモジュール
 """
 import numpy as np
-from .se3 import SE3, integrate_se3
+from .se3 import SE3, integrate_se3, skew
+from .constants import get_gravity
+from scipy.spatial.transform import Rotation
 
 
 class Drone:
@@ -10,7 +12,7 @@ class Drone:
     SE(3)上のドローンモデル
     """
     
-    def __init__(self, T=None, camera_direction=None, fov_angle=np.pi/3, R=None, p=None):
+    def __init__(self, T=None, camera_direction=None, fov_angle=np.pi/3):
         """
         ドローンを初期化
         
@@ -170,6 +172,81 @@ class Drone:
         """オブジェクトの表現"""
         return self.__str__()
 
+
+class DynamicDrone(Drone):
+    """
+    SE(3)上の2次系ドローンモデル
+    """
+    
+    def __init__(self, T=None, camera_direction=None, fov_angle=np.pi/3, dynamics_model='dynamics'):
+        """
+        2次系ドローンを初期化
+        
+        Parameters:
+        -----------
+        T : SE3, optional
+            初期位置と姿勢（デフォルトは原点、単位姿勢）
+        camera_direction : array_like, shape (3,), optional
+            カメラの向きを表す単位ベクトル（デフォルトは[0, 0, 1]）
+        fov_angle : float, optional
+            カメラの視野角（デフォルトはπ/3ラジアン）
+        dynamics_model : str, optional
+            動力学モデル: 'dynamics'（非ホロノミック系）または'holonomic_dynamics'（ホロノミック系）
+            （デフォルトは'dynamics'）
+        """
+        super().__init__(T, camera_direction, fov_angle)
+        # 速度と角速度の状態を追加
+        self.v = np.zeros(3)  # 速度（ボディフレーム）
+        self.omega = np.zeros(3)  # 角速度
+        # 質量と慣性モーメント
+        self.M = np.eye(3)  # 質量行列
+        self.J = np.eye(3)  # 慣性テンソル
+        # 動力学モデル
+        self.dynamics_model = dynamics_model
+        self.g = get_gravity()
+    
+    def update(self, u, dt, frame='body'):
+        """
+        加速度入力に基づいてドローンの状態を更新
+        
+        Parameters:
+        -----------
+        u : array_like
+            加速度入力
+            dynamics_model='dynamics'の場合: shape (4,), [f, tau]
+                f: 推力（スカラー）
+                tau: トルク（3次元ベクトル）
+            dynamics_model='holonomic_dynamics'の場合: shape (6,), [f, tau]
+                f: 推力（3次元ベクトル）
+                tau: トルク（3次元ベクトル）
+        dt : float
+            時間ステップ
+        frame : str, optional
+            'body'または'world'（デフォルトは'body'）
+        """
+        # 動力学モデルに応じて入力を分解
+        if self.dynamics_model == 'holonomic_dynamics':
+            # ホロノミック系（3次元ベクトル推力）
+            f = u[0:3]  # 3次元ベクトル推力
+            tau = u[3:6]  # トルク
+        else:
+            # 非ホロノミック系（スカラー推力）
+            f_scalar = u[0]  # スカラー推力
+            tau = u[1:4]  # トルク
+            f = np.array([0, 0, f_scalar])  # z軸方向の推力
+        
+        # SE(3)_dynamics.mdの式に基づく更新
+        # 回転の更新
+        self.omega = self.omega + dt * np.linalg.inv(self.J) @ tau
+        F = np.eye(3) + dt * skew(self.omega)  # 近似的な指数写像
+        self.T.R = self.T.R @ F
+        # RをR=>quat=>SO(3)に正規化
+        quat = Rotation.from_matrix(self.T.R).as_quat()
+        self.T.R = Rotation.from_quat(quat).as_matrix()
+        
+        # 並進の更新
+        self.v = self.v + dt * (np.cross(self.v, self.omega) - self.T.R.T @ self.g + f / self.M[0, 0])
+        self.T.p = self.T.p + dt * self.T.R @ self.v
 
 class FeaturePoint:
     """

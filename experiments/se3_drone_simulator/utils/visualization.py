@@ -49,18 +49,18 @@ class Visualizer:
         # 安全集合のプロット設定
         self.ax_safety.set_xlabel('Time [s]')
         self.ax_safety.set_ylabel('Safety Value')
-        self.ax_safety.set_title('Safety Value (B) and dB/dt')
+        self.ax_safety.set_title(r'Safety Value $(B_{ij} \geq 0)$')
         self.ax_safety.grid(True)
-        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label='B_{ij}')
-        self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label='dB_{ij}/dt')
+        self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label=r'$B_{ij}$')
+        # self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label='dB_{ij}/dt')
         self.ax_safety.legend()
         
         # 制約余裕のプロット設定
         self.ax_constraint.set_xlabel('Time [s]')
-        self.ax_constraint.set_ylabel('Constraint Margin')
-        self.ax_constraint.set_title('Constraint Margin')
+        self.ax_constraint.set_ylabel(r'$b_{ij}-A_i\xi_i-A_j\xi_j$')
+        self.ax_constraint.set_title(r'Constraint Margin $(b_{ij}-A_i\xi_i-A_j\xi_j\geq 0)$')
         self.ax_constraint.grid(True)
-        self.constraint_line1, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label='constraint')
+        self.constraint_line1, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label=r'$b_{ij}-A_i\xi_i-A_j\xi_j$')
         self.ax_constraint.legend()
         
         # 値を記録するためのリスト
@@ -94,6 +94,10 @@ class Visualizer:
         self.target_positions = []
         self.target_artists = []
         self.target_line_artists = []
+        
+        # 目標軌道の描画アーティスト
+        self.target_trajectories = []
+        self.target_trajectory_artists = []
         
         # ドローンの軌道を記録
         self.trajectories = [[] for _ in range(len(simulator.drones))]
@@ -455,7 +459,7 @@ class Visualizer:
         
         # プロットを更新
         self.safety_line.set_data(self.time_values, self.safety_values)
-        self.ax_dot_line.set_data(self.time_values, self.ax_dot_values)
+        # self.ax_dot_line.set_data(self.time_values, self.ax_dot_values)
         
         # 制約余裕のプロットを更新
         if len(self.constraint_margin_values) > 0:
@@ -479,6 +483,36 @@ class Visualizer:
         for artist in self.target_line_artists:
             artist.remove()
         self.target_line_artists = []
+        
+        # 古い目標軌道の描画を削除
+        for artist in self.target_trajectory_artists:
+            artist.remove()
+        self.target_trajectory_artists = []
+        
+        # 目標軌道を描画
+        if hasattr(self, 'target_trajectories') and self.target_trajectories:
+            for i, trajectory in enumerate(self.target_trajectories):
+                if i >= len(self.simulator.drones):
+                    continue
+                    
+                color = self.drone_colors[i % len(self.drone_colors)]
+                
+                # 軌道の点を取得
+                trajectory_points = np.array(trajectory)
+                
+                # 軌道を描画
+                trajectory_artist = self.ax.plot(
+                    trajectory_points[:, 0],
+                    trajectory_points[:, 1],
+                    trajectory_points[:, 2],
+                    '--',  # 破線
+                    color=color,
+                    alpha=0.5,
+                    linewidth=2,
+                    label=f'Target Trajectory {i}'
+                )[0]
+                
+                self.target_trajectory_artists.append(trajectory_artist)
         
         # 目標位置が設定されていない場合は何もしない
         if not self.target_positions:
@@ -540,6 +574,9 @@ class Visualizer:
             else:
                 # デフォルトの入力（静止）
                 drone_inputs = [np.zeros(6) for _ in range(len(self.simulator.drones))]
+
+            if drone_inputs is None:
+                return
             
             # シミュレーションを1ステップ進める
             self.simulator.step(drone_inputs)
@@ -562,7 +599,7 @@ class Visualizer:
             artists.extend(self.target_artists)
             artists.extend(self.target_line_artists)
             artists.append(self.safety_line)
-            artists.append(self.ax_dot_line)
+            # artists.append(self.ax_dot_line)
             artists.append(self.constraint_line1)
             
             return artists

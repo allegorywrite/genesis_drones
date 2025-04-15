@@ -3,7 +3,8 @@ SE(3)上の制約付き最適化問題（Control Barrier Function）を実装す
 """
 import numpy as np
 from .se3 import SE3, skew
-from .drone import Drone, FeaturePoint
+from .drone import Drone, DynamicDrone, FeaturePoint
+from .constants import get_gravity
 
 def sample_safe_configuration(simulator, fov_angle, min_barrier_value=0.0, max_attempts=1000, q=0.5):
     """
@@ -381,6 +382,189 @@ def compute_gamma(drone1, drone2, feature_points, q=0.5, d=1.0):
     gamma_val = 1.0 - q - prod_term
 
     return gamma_val
+
+def compute_hocbf_single_point_coefficients(drone, feature_point, gamma0=0.1, gamma1=0.1):
+    """
+    単一特徴点のHOCBF制約の係数を計算（develop_dynamics.mdに基づく実装）
+    
+    Parameters:
+    -----------
+    drone : DynamicDrone
+        2次系ドローン
+    feature_point : FeaturePoint
+        視野内の特徴点
+    gamma0 : float, optional
+        CBFのゲイン0（デフォルトは0.1）
+    gamma1 : float, optional
+        CBFのゲイン1（デフォルトは0.1）
+        
+    Returns:
+    --------
+    C : ndarray, shape (1, 4) または shape (1, 6)
+        制約行列 [C_f, C_tau]
+    b : float
+        制約の右辺値
+    """
+    v = drone.v
+    omega = drone.omega
+    M = drone.M[0, 0]
+    R = drone.T.R
+    g = get_gravity()
+
+    # カメラの方向ベクトル
+    e_c = drone.camera_direction
+    
+    # 視野角の余弦
+    cos_psi_F = np.cos(drone.fov_angle)
+    
+    # 特徴点の位置
+    q_l = feature_point.position
+    
+    # βベクトル（特徴点の方向を表す単位ベクトル）
+    beta_l = drone.get_beta_vector(q_l)
+    
+    # 安全集合の値（B）の計算
+    B = beta_l.T @ drone.T.R @ e_c - cos_psi_F
+    
+    # 投影行列
+    P_beta_l = np.eye(3) - np.outer(beta_l, beta_l)
+    
+    # 距離
+    d_il = np.linalg.norm(q_l - drone.T.p)
+    
+    # C_tau: トルクに関する係数
+    C_tau = beta_l.T @ drone.T.R @ skew(e_c) @ np.linalg.inv(drone.J)
+    
+    # 動力学モデルに応じて処理を分岐
+    if drone.dynamics_model == 'holonomic_dynamics':
+        # ホロノミック系の場合
+        # C_f: 推力に関する係数（3次元ベクトル）
+        C_f = e_c.T @ drone.T.R.T @ P_beta_l @ drone.T.R / (d_il*M)
+        
+        # 制約行列
+        C = np.zeros(6)
+        C[0:3] = C_f
+        C[3:6] = C_tau
+    else:
+        # 非ホロノミック系の場合
+        # C_f: 推力に関する係数（スカラー）
+        C_f = e_c.T @ drone.T.R.T @ P_beta_l @ drone.T.R @ np.array([0, 0, 1]) / (d_il*M)
+        
+        # 制約行列
+        C = np.zeros(4)
+        C[0] = C_f
+        C[1:4] = C_tau
+    
+    # 右辺の計算（develop_dynamics.mdの式に基づく）
+
+    # 1階微分項の計算
+    B_dot = -beta_l.T @ drone.T.R @ skew(e_c) @ drone.omega - e_c.T @ drone.T.R.T @ P_beta_l @ drone.T.R @ drone.v / d_il
+    
+    # 2階微分項の計算
+    z = R @ e_c
+
+    term1 = (beta_l @ (z.T @ P_beta_l) + (z.T @ beta_l)*P_beta_l + P_beta_l @ z @ beta_l.T) / d_il**2
+    term2 = z.T @ P_beta_l @ R @ skew(omega) / d_il
+
+    hess_ph_omega = v.T @ R.T @ P_beta_l @ R @ skew(e_c) @ omega / d_il
+    hess_ph_v = -v.T @ R.T @ term1 @ R @ v - term2 @ v
+    hess_Rh_v = hess_ph_omega
+    hess_Rh_omega = - beta_l.T @ R @ skew(omega) @ skew(e_c) @ omega
+    # print("hess_Rh_omega:", hess_Rh_omega)
+    # print("hess_Rh_v:", hess_Rh_v)
+    # print("hess_ph_v:", hess_ph_v)
+    # print("hess_ph_omega:", hess_ph_omega)
+
+    A_g = np.cross(v, omega) - np.dot(R.T, g)
+    b_g = - e_c.T @ R.T @ P_beta_l @ R @ A_g / d_il
+
+    B_ddot_minus = hess_ph_omega + hess_ph_v + hess_Rh_v + hess_Rh_omega + b_g
+    b = B_ddot_minus + (gamma0 + gamma1)*B_dot + (gamma0*gamma1)*B
+    
+    return C, b, B, B_dot, B_ddot_minus
+
+def compute_position_tracking_acceleration_control(drone, p_des, K_p=1.0, K_d=0.5):
+    """
+    目標位置に追従するための加速度制御入力を計算
+    
+    Parameters:
+    -----------
+    drone : DynamicDrone
+        2次系ドローン
+    p_des : array_like, shape (3,)
+        目標位置
+    K_p : float, optional
+        位置制御のゲイン（デフォルトは1.0）
+    K_d : float, optional
+        速度制御のゲイン（デフォルトは0.5）
+        
+    Returns:
+    --------
+    u : ndarray, shape (4,) または shape (6,)
+        制御入力 [f, tau]
+        dynamics_model='dynamics'の場合: shape (4,), [f, tau]
+            f: 推力（スカラー）
+            tau: トルク（3次元ベクトル）
+        dynamics_model='holonomic_dynamics'の場合: shape (6,), [f, tau]
+            f: 推力（3次元ベクトル）
+            tau: トルク（3次元ベクトル）
+    """
+    # 現在位置と目標位置の誤差
+    p_error = p_des - drone.T.p
+    
+    # 速度誤差（目標速度は0と仮定）
+    v_error = -drone.v
+    
+    # PD制御則
+    a_des = K_p * p_error + K_d * v_error
+    
+    # 重力補償
+    g = get_gravity()
+    
+    # 必要な加速度（ワールド座標系）
+    a_world = a_des + g
+    
+    # ボディ座標系に変換
+    a_body = drone.T.R.T @ a_world
+    
+    # 姿勢制御（簡易的な実装）
+    # 目標の姿勢は上向き（z軸）を維持
+    R_des = np.eye(3)
+    
+    # 回転誤差
+    R_error = R_des.T @ drone.T.R
+    
+    # 軸角表現に変換
+    from scipy.spatial.transform import Rotation
+    r = Rotation.from_matrix(R_error)
+    rotvec = r.as_rotvec()
+    
+    # PD制御則（角速度フィードバック）
+    tau = -K_p * rotvec - K_d * drone.omega
+    
+    # 動力学モデルに応じて処理を分岐
+    if hasattr(drone, 'dynamics_model') and drone.dynamics_model == 'holonomic_dynamics':
+        # ホロノミック系の場合
+        # 推力（3次元ベクトル）
+        f = drone.M[0, 0] * a_body
+        
+        # 制御入力
+        u = np.zeros(6)
+        u[0:3] = f
+        u[3:6] = tau
+    else:
+        # 非ホロノミック系の場合
+        # 推力（z軸方向のみ）
+        f = drone.M[0, 0] * a_body[2]
+        
+        # 制御入力
+        u = np.zeros(4)
+        u[0] = f
+        u[1:4] = tau
+    
+    return u
+
+
 
 
 def compute_cbf_constraint_coefficients(drone1, drone2, feature_points, q=0.5, d=1.0):
