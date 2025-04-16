@@ -60,15 +60,22 @@ class Visualizer:
         self.ax_constraint.set_ylabel(r'$b_{ij}-A_i\xi_i-A_j\xi_j$')
         self.ax_constraint.set_title(r'Constraint Margin $(b_{ij}-A_i\xi_i-A_j\xi_j\geq 0)$')
         self.ax_constraint.grid(True)
-        self.constraint_line1, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label=r'$b_{ij}-A_i\xi_i-A_j\xi_j$')
+        self.constraint_line1, = self.ax_constraint.plot([], [], 'b-', linewidth=2, label=r'$A_i\xi_i-\frac{1}{2}b_{ij}$')
+        self.constraint_line2, = self.ax_constraint.plot([], [], 'r-', linewidth=2, label=r'$A_j\xi_j-\frac{1}{2}b_{ij}$')
+        self.constraint_line3, = self.ax_constraint.plot([], [], 'g--', linewidth=2, label=r'$b_{ij}-A_i\xi_i-A_j\xi_j$')
         self.ax_constraint.legend()
         
         # 値を記録するためのリスト
         self.safety_values = []
         self.constraint_values = None
-        self.constraint_margin_values = []
+        self.constraint_margin_values1 = []  # ドローン1の制約余裕
+        self.constraint_margin_values2 = []  # ドローン2の制約余裕
+        self.integrated_constraint_values = []  # 分散最適化の統合制約値
         self.ax_dot_values = []
         self.time_values = []
+        
+        # 分散最適化かどうかのフラグ
+        self.is_distributed = False
         
         # 描画アーティスト
         self.drone_artists = []
@@ -217,7 +224,7 @@ class Visualizer:
         # 視野角の描画パラメータ
         color = self.drone_colors[drone_idx % len(self.drone_colors)]
         alpha = 0.8
-        h = 2.0  # 円錐の高さ
+        h = 1.0  # 円錐の高さ
         
         # カメラの向きを取得
         p = drone.T.p
@@ -422,39 +429,83 @@ class Visualizer:
             
             # 制約余裕の値を記録
             if constraint_value is not None:
-                # 速度入力及び角速度入力について分解しない場合は1次元
-                if isinstance(constraint_value, np.ndarray) and constraint_value.size > 1:
-                    self.constraint_margin_values.append(constraint_value[0])
+                # 分散最適化の場合は、constraint_valueが3つの値を持つタプルになっている
+                if self.is_distributed and isinstance(constraint_value, tuple) and len(constraint_value) == 3:
+                    drone1_margin, drone2_margin, integrated_constraint = constraint_value
+                    self.constraint_margin_values1.append(drone1_margin)
+                    self.constraint_margin_values2.append(drone2_margin)
+                    self.integrated_constraint_values.append(integrated_constraint)
+                # 通常の場合（速度入力及び角速度入力について分解しない場合は1次元）
+                elif isinstance(constraint_value, np.ndarray) and constraint_value.size > 1:
+                    self.constraint_margin_values1.append(constraint_value[0])
+                    self.constraint_margin_values2.append(constraint_value[0])  # 同じ値を使用
+                    if len(self.integrated_constraint_values) > 0:
+                        self.integrated_constraint_values.append(self.integrated_constraint_values[-1])
+                    else:
+                        self.integrated_constraint_values.append(0)
                 else:
-                    self.constraint_margin_values.append(constraint_value)
+                    self.constraint_margin_values1.append(constraint_value)
+                    self.constraint_margin_values2.append(constraint_value)  # 同じ値を使用
+                    if len(self.integrated_constraint_values) > 0:
+                        self.integrated_constraint_values.append(self.integrated_constraint_values[-1])
+                    else:
+                        self.integrated_constraint_values.append(0)
                 
                 # dB_ij/dtの値を計算（制約値から安全集合の値にgamma0を掛けた値を引く）
                 # 制約値 = dB_ij/dt + gamma0 * B_ij
                 # よって dB_ij/dt = 制約値 - gamma0 * B_ij
                 gamma0 = 0.1  # CBF制約のゲイン
-                ax_value = constraint_value - gamma0 * safety_value
+                if self.is_distributed and isinstance(constraint_value, tuple):
+                    ax_value = drone1_margin - gamma0 * safety_value
+                else:
+                    ax_value = constraint_value - gamma0 * safety_value
                 self.ax_dot_values.append(ax_value)
-            elif len(self.constraint_margin_values) > 0:
+            elif len(self.constraint_margin_values1) > 0 or len(self.constraint_margin_values2) > 0:
                 # 制約余裕がない場合は前回の値を使用
-                self.constraint_margin_values.append(self.constraint_margin_values[-1])
+                if len(self.constraint_margin_values1) > 0:
+                    self.constraint_margin_values1.append(self.constraint_margin_values1[-1])
+                else:
+                    self.constraint_margin_values1.append(0)
+                
+                if len(self.constraint_margin_values2) > 0:
+                    self.constraint_margin_values2.append(self.constraint_margin_values2[-1])
+                else:
+                    self.constraint_margin_values2.append(0)
+                
+                if len(self.integrated_constraint_values) > 0:
+                    self.integrated_constraint_values.append(self.integrated_constraint_values[-1])
+                else:
+                    self.integrated_constraint_values.append(0)
                 if len(self.ax_dot_values) > 0:
                     self.ax_dot_values.append(self.ax_dot_values[-1])
                 else:
                     self.ax_dot_values.append(0)
             else:
                 # 初めての場合は0を使用
-                self.constraint_margin_values.append(0)
+                self.constraint_margin_values1.append(0)
+                self.constraint_margin_values2.append(0)
+                self.integrated_constraint_values.append(0)
                 self.ax_dot_values.append(0)
-        elif len(self.constraint_margin_values) > 0:
+        elif len(self.constraint_margin_values1) > 0 or len(self.constraint_margin_values2) > 0:
             # 制約値がない場合は前回の値を使用
-            self.constraint_margin_values.append(self.constraint_margin_values[-1])
+            if len(self.constraint_margin_values1) > 0:
+                self.constraint_margin_values1.append(self.constraint_margin_values1[-1])
+            else:
+                self.constraint_margin_values1.append(0)
+            
+            if len(self.constraint_margin_values2) > 0:
+                self.constraint_margin_values2.append(self.constraint_margin_values2[-1])
+            else:
+                self.constraint_margin_values2.append(0)
+            
             if len(self.ax_dot_values) > 0:
                 self.ax_dot_values.append(self.ax_dot_values[-1])
             else:
                 self.ax_dot_values.append(0)
         else:
             # 初めての場合は0を使用
-            self.constraint_margin_values.append(0)
+            self.constraint_margin_values1.append(0)
+            self.constraint_margin_values2.append(0)
             self.ax_dot_values.append(0)
         
         # プロットを更新
@@ -462,8 +513,15 @@ class Visualizer:
         # self.ax_dot_line.set_data(self.time_values, self.ax_dot_values)
         
         # 制約余裕のプロットを更新
-        if len(self.constraint_margin_values) > 0:
-            self.constraint_line1.set_data(self.time_values, self.constraint_margin_values)
+        if len(self.constraint_margin_values1) > 0:
+            self.constraint_line1.set_data(self.time_values, self.constraint_margin_values1)
+        
+        if len(self.constraint_margin_values2) > 0:
+            self.constraint_line2.set_data(self.time_values, self.constraint_margin_values2)
+        
+        # 分散最適化の場合は統合制約値もプロット
+        if self.is_distributed and len(self.integrated_constraint_values) > 0:
+            self.constraint_line3.set_data(self.time_values, self.integrated_constraint_values)
         
         # 軸の範囲を自動調整
         self.ax_safety.relim()
@@ -601,6 +659,9 @@ class Visualizer:
             artists.append(self.safety_line)
             # artists.append(self.ax_dot_line)
             artists.append(self.constraint_line1)
+            artists.append(self.constraint_line2)
+            if self.is_distributed:
+                artists.append(self.constraint_line3)
             
             return artists
         

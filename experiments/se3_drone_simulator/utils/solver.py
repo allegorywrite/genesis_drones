@@ -197,9 +197,9 @@ def solve_distributed_ieq_pdmm_qp(drone1, drone2, feature_points, p1_des, p2_des
     """
     # デフォルトの重み行列
     if Q1 is None:
-        Q1 = np.eye(3)
+        Q1 = np.eye(3)*0.5
     if Q2 is None:
-        Q2 = np.eye(6)*0.01
+        Q2 = np.eye(6)*0.00001
     
     # CBF制約の係数を計算
     from .cbf_se3 import compute_cbf_constraint_coefficients, compute_gamma_predict
@@ -342,7 +342,7 @@ def solve_distributed_ieq_pdmm_qp(drone1, drone2, feature_points, p1_des, p2_des
     b_full = np.array([gamma0 * gamma_val])
     
     x_opt = np.concatenate([xi1, xi2])
-    constraint_value = np.dot(A, x_opt) - b_full
+    constraint_value = b_full - np.dot(A, x_opt)
     
     return xi1, xi2, (alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value)
 

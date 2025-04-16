@@ -75,15 +75,19 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
             feature = visible_features[0]
             
             # HOCBFのゲイン
-            gamma0 = 0.1
-            gamma1 = 0.1
+            gamma0 = 3.0
+            gamma1 = 3.0
+            Q1 = np.eye(3)
+            Q2 = np.eye(6)
+            Q2[0:3, 0:3] = np.eye(3)*0.0000001 # 推力
+            Q2[3:6, 3:6] = np.eye(3)*0.000005 # トルク
             
             # QP問題を解く
             u, constraint_value, B_val, B_dot_val, B_ddot_val = solve_dynamic_qp(
                 drone, feature, current_target, use_cbf=True, 
-                gamma0=gamma0, gamma1=gamma1
+                gamma0=gamma0, gamma1=gamma1, Q1=Q1, Q2=Q2
             )
-
+            # print(f"制御入力: {u}")
             if constraint_value is not None:
                 constraint_margin = constraint_value
             

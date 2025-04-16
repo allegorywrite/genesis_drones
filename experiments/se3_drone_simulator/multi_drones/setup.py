@@ -101,9 +101,10 @@ def add_feature_points(simulator, trajectory_type):
         
         # 原点付近にNxNxNの格子状に配置
         n_points = 5
-        for x in np.linspace(-1.5, 1.5, n_points):
-            for y in np.linspace(-1.5, 1.5, n_points):
-                for z in np.linspace(-1.5, 1.5, n_points):
+        radius = 3.0
+        for x in np.linspace(-radius, radius, n_points):
+            for y in np.linspace(-radius/3, radius/3, n_points):
+                for z in np.linspace(-radius, radius, n_points):
                     fp = FeaturePoint([x, y, z])
                     simulator.add_feature_point(fp)
     else:

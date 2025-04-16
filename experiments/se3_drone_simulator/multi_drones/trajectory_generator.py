@@ -41,7 +41,7 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
     offset = np.zeros(3)
     if num_drones > 1:
         # X軸方向に均等に配置
-        offset[0] = (drone_idx - (num_drones - 1) / 2) * 2.0
+        offset[0] = (drone_idx - (num_drones - 1) / 2) * 4.0
     
     if trajectory_type == 'circle':
         # 円軌道
@@ -83,7 +83,7 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
             trajectory[:, i] = start_point[i] + (end_point[i] - start_point[i]) * t
         
         # 進行方向に垂直な方向に周波数成分（サイン波）を追加
-        amplitude = 3.0  # 振幅
+        amplitude = 1.5  # 振幅
         frequency = 2.0  # 周波数
         
         # サイン波の周波数成分

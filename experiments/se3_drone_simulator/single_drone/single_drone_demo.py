@@ -127,12 +127,15 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         trajectory[:, 2] += amplitude * np.cos(2 * np.pi * freq * t)    
         
     elif trajectory_type == 'step':
-        # [0, 0, 1]に固定された目標位置
+        # 原点から始まり、[0, 0, 3]に固定された目標位置
         fixed_target = np.array([0.0, 0.0, 3.0])
         
         # すべてのフレームで同じ目標位置
         for i in range(num_frames):
             trajectory[i] = fixed_target
+        
+        # 始点を原点に設定
+        trajectory[0] = np.array([0.0, 0.0, 0.0])
         
     else:
         raise ValueError(f"不明な軌道タイプ: {trajectory_type}")
@@ -184,18 +187,6 @@ def main():
     gravity = np.array(args.gravity)
     set_gravity(gravity)
     
-    # 動力学モデルに応じてドローンを初期化
-    if args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics':
-        camera_direction = np.array([0, 1, 0])
-        T = SE3(R=np.eye(3), p=np.array([0.0, 0.0, 0.0]))
-        drone = DynamicDrone(fov_angle=np.pi/6, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
-        print("2次系モデル（動力学モデル）を使用します")
-    else:
-        drone = Drone(fov_angle=np.pi/6)
-        print("1次系モデル（運動学モデル）を使用します")
-        # 初期位置と姿勢を特徴点が視野内に入るように設定
-        setup_drone_initial_pose(drone, feature_area_center)
-    
     # フレーム数
     num_frames = 200
     
@@ -210,6 +201,22 @@ def main():
     
     # 初期の目標位置（軌道の最初の点）
     target_position = target_trajectory[0]
+    
+    # 動力学モデルに応じてドローンを初期化
+    if args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics':
+        camera_direction = np.array([0, 1, 0])
+        # ドローンの初期位置を軌道の始点に合わせる
+        T = SE3(R=np.eye(3), p=target_position)
+        drone = DynamicDrone(fov_angle=np.pi/6, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
+        print("2次系モデル（動力学モデル）を使用します")
+    else:
+        drone = Drone(fov_angle=np.pi/6)
+        print("1次系モデル（運動学モデル）を使用します")
+        # ドローンの初期位置を軌道の始点に設定
+        drone.position = target_position.copy()
+        # 初期位置と姿勢を特徴点が視野内に入るように設定（カメラ方向のみ）
+        setup_drone_initial_pose(drone, feature_area_center)
+    
     
     # 可視化の初期化（目標位置を設定）
     visualizer = SingleDroneVisualizer(

@@ -75,13 +75,13 @@ def main():
     
     # 共有視野内の特徴点を表示
     cofov_indices = simulator.get_cofov_feature_points(0, 1)
-    print(f"共有視野内の特徴点数: {len(cofov_indices)}")
+    # print(f"共有視野内の特徴点数: {len(cofov_indices)}")
     if len(cofov_indices) > 0:
-        print("共有視野内の特徴点インデックス:", cofov_indices)
-        print("共有視野内の特徴点座標:")
+        # print("共有視野内の特徴点インデックス:", cofov_indices)
+        # print("共有視野内の特徴点座標:")
         for idx in cofov_indices:
             fp = simulator.feature_points[idx]
-            print(f"  特徴点 {idx}: {fp.position}")
+            # print(f"  特徴点 {idx}: {fp.position}")
     
     # 可視化の初期化
     visualizer = Visualizer(

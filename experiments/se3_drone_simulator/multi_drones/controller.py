@@ -40,6 +40,10 @@ def create_drone_inputs_func(simulator, target_trajectories, visualizer, args, n
     target_positions = [trajectory[0] for trajectory in target_trajectories]
     visualizer.target_positions = target_positions
     
+    # 分散最適化の場合はフラグを設定
+    if args.use_cbf and args.optimization_method == 'distributed':
+        visualizer.is_distributed = True
+    
     # 軌道追従が完了したかどうかのフラグ
     trajectory_completed = False
     
@@ -112,6 +116,48 @@ def create_drone_inputs_func(simulator, target_trajectories, visualizer, args, n
                     # print(f"フレーム {frame}: 分散型最適化（IEQ-PDMM）")
                     # print(f"ドローン1: 位置誤差 = {p1_error:.4f}, 目標位置 = {p1_des}")
                     # print(f"ドローン2: 位置誤差 = {p2_error:.4f}, 目標位置 = {p2_des}")
+                
+                # 制約値を処理して、各ドローンの制約余裕と統合した制約値を取得
+                if constraint_values is not None:
+                    alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, constraint_value = constraint_values
+                    
+                    # 制約値が存在する場合
+                    if constraint_value is not None:
+                        # 各ドローンの制約余裕を計算
+                        # ドローン1の制約行列
+                        A1 = np.zeros((1, 6))
+                        A1[0, :3] = alpha_omega
+                        A1[0, 3:6] = alpha_v
+                        
+                        # ドローン2の制約行列
+                        A2 = np.zeros((1, 6))
+                        A2[0, :3] = beta_omega
+                        A2[0, 3:6] = beta_v
+                        
+                        # 制約の右辺（各ドローンで半分ずつ）
+                        b_half = np.array([args.gamma * gamma_val / 2])
+                        
+                        # 各ドローンの制約余裕を計算
+                        drone1_constraint = float(b_half - np.dot(A1, xi1))
+                        drone2_constraint = float(b_half - np.dot(A2, xi2))
+                        
+                        # 統合した制約値を計算
+                        # 制約行列の構築
+                        A = np.zeros((1, 12))
+                        A[0, :3] = alpha_omega
+                        A[0, 3:6] = alpha_v
+                        A[0, 6:9] = beta_omega
+                        A[0, 9:] = beta_v
+                        
+                        # 制約の右辺
+                        b = np.array([args.gamma * gamma_val])
+                        
+                        # 統合した制約値を計算
+                        x_opt = np.concatenate([xi1, xi2])
+                        integrated_constraint = float(b - np.dot(A, x_opt))
+                        
+                        # 制約値をタプルとして設定（ドローン1の制約余裕, ドローン2の制約余裕, 統合した制約値）
+                        constraint_values = (alpha_omega, beta_omega, alpha_v, beta_v, gamma_val, (drone1_constraint, drone2_constraint, integrated_constraint))
             else:
                 # 集中型最適化（既存の実装）
                 xi1, xi2, constraint_values = solve_direct_cbf_qp(
