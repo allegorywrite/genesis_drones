@@ -1,6 +1,7 @@
 """
 SE(3)上の制約付き最適化問題（Control Barrier Function）を実装するモジュール
 """
+import math
 import numpy as np
 from .se3 import SE3, skew
 from .drone import Drone, DynamicDrone, FeaturePoint
@@ -440,6 +441,16 @@ def compute_hocbf_single_point_coefficients(drone, feature_point, gamma0=0.1, ga
         # ホロノミック系の場合
         # C_f: 推力に関する係数（3次元ベクトル）
         C_f = e_c.T @ drone.T.R.T @ P_beta_l @ drone.T.R / (d_il*M)
+
+        print(f"e_c: {e_c}")
+        print(f"beta_l: {beta_l}")
+        print(f"P_beta_l: {P_beta_l}")
+        print(f"drone.T.R: {drone.T.R}")
+        print(f"d_il: {d_il}")
+        print(f"M: {M}")
+
+        print(f"C_f: {C_f}")
+        print(f"C_tau: {C_tau}")
         
         # 制約行列
         C = np.zeros(6)
@@ -470,16 +481,277 @@ def compute_hocbf_single_point_coefficients(drone, feature_point, gamma0=0.1, ga
     hess_ph_v = -v.T @ R.T @ term1 @ R @ v - term2 @ v
     hess_Rh_v = hess_ph_omega
     hess_Rh_omega = - beta_l.T @ R @ skew(omega) @ skew(e_c) @ omega
-    # print("hess_Rh_omega:", hess_Rh_omega)
-    # print("hess_Rh_v:", hess_Rh_v)
-    # print("hess_ph_v:", hess_ph_v)
-    # print("hess_ph_omega:", hess_ph_omega)
+    print("hess_Rh_omega:", hess_Rh_omega)
+    print("hess_Rh_v:", hess_Rh_v)
+    print("hess_ph_v:", hess_ph_v)
+    print("hess_ph_omega:", hess_ph_omega)
 
+    print("B:", B)
+    print("B_dot:", B_dot)
+    
     A_g = np.cross(v, omega) - np.dot(R.T, g)
+    # A_g =  - np.dot(R.T, g)
     b_g = - e_c.T @ R.T @ P_beta_l @ R @ A_g / d_il
 
     B_ddot_minus = hess_ph_omega + hess_ph_v + hess_Rh_v + hess_Rh_omega + b_g
     b = B_ddot_minus + (gamma0 + gamma1)*B_dot + (gamma0*gamma1)*B
+    
+    return C, b, B, B_dot, B_ddot_minus
+
+def compute_hocbf_multi_point_coefficients(drone, feature_points, q=0.5, gamma0=0.1, gamma1=0.1):
+    """
+    複数特徴点のHOCBF制約の係数を計算（develop_dynamics.mdに基づく実装）
+    
+    Parameters:
+    -----------
+    drone : DynamicDrone
+        2次系ドローン
+    feature_points : list of FeaturePoint
+        視野内の特徴点のリスト
+    q : float, optional
+        確率の閾値（デフォルトは0.5）
+    gamma0 : float, optional
+        CBFのゲイン0（デフォルトは0.1）
+    gamma1 : float, optional
+        CBFのゲイン1（デフォルトは0.1）
+        
+    Returns:
+    --------
+    C : ndarray, shape (1, 4) または shape (1, 6)
+        制約行列 [C_f, C_tau]
+    b : float
+        制約の右辺値
+    B : float
+        安全集合の値
+    B_dot : float
+        安全集合の1階微分
+    B_ddot_minus : float
+        制御入力を除いた安全集合の2階微分
+    """
+    v = drone.v
+    omega = drone.omega
+    M = drone.M[0, 0]
+    R = drone.T.R
+    g = get_gravity()
+
+    # カメラの方向ベクトル
+    e_c = drone.camera_direction
+    
+    # 視野角の余弦
+    cos_psi_F = np.cos(drone.fov_angle)
+    
+    # ドローンから見える特徴点を取得
+    visible_features = []
+    for fp in feature_points:
+        if drone.is_point_visible(fp.position):
+            visible_features.append(fp)
+    
+    # 視野内の特徴点がない場合
+    if not visible_features:
+        print("警告: 視野内に特徴点がありません")
+        # 制約なしの場合と同様に扱う
+        if drone.dynamics_model == 'holonomic_dynamics':
+            C = np.zeros(6)
+        else:
+            C = np.zeros(4)
+        return C, 0.0, 0.0, 0.0, 0.0
+    
+    # 安全集合の値（B）の計算
+    # B_i = 1 - q - η_i
+    # η_i = Π_{l∈L}(1-φ_i^l)
+    eta_i = 1.0
+    phi_values = []
+    
+    for fp in visible_features:
+        # 特徴点の位置
+        q_l = fp.position
+        
+        # βベクトル（特徴点の方向を表す単位ベクトル）
+        beta_l = drone.get_beta_vector(q_l)
+        
+        # P_i^l = (β_l^T(p_i) R_i e_c - cos(Ψ_F)) / (1 - cos(Ψ_F))
+        P_i_l = (beta_l.T @ R @ e_c - cos_psi_F) / (1 - cos_psi_F)
+        
+        # φ_i^l = P_i^l（視野内の特徴点の場合）
+        phi_i_l = P_i_l
+        phi_values.append(phi_i_l)
+        
+        # η_i = Π_{l∈L}(1-φ_i^l)
+        eta_i *= (1 - phi_i_l)
+    
+    # B_i = 1 - q - η_i
+    B = 1 - q - eta_i
+    
+    # 安全集合の1階微分の計算
+    # Ḃ_i = -η̇_i
+    # η̇_i = Σ_{l∈L}(Π_{k≠l}(1-φ_i^k))φ̇_i^l
+    B_dot = 0.0
+    
+    for i, fp in enumerate(visible_features):
+        # Π_{k≠l}(1-φ_i^k)
+        prod_other = 1.0
+        for j, phi in enumerate(phi_values):
+            if i != j:
+                prod_other *= (1 - phi)
+        
+        # 特徴点の位置
+        q_l = fp.position
+        
+        # βベクトル（特徴点の方向を表す単位ベクトル）
+        beta_l = drone.get_beta_vector(q_l)
+        
+        # 投影行列
+        P_beta_l = np.eye(3) - np.outer(beta_l, beta_l)
+        
+        # 距離
+        d_il = np.linalg.norm(q_l - drone.T.p)
+        
+        # φ̇_i^l = ⟨grad P_i^l, ξ_W⟩
+        # grad_R P_i^l = (1/(1-cos ψ_F))(-β_l^T(p_i) R_i [e_c]_×)
+        grad_R_P_i_l = (1 / (1 - cos_psi_F)) * (-beta_l.T @ R @ skew(e_c))
+        
+        # grad_p P_i^l = (1/(1-cos ψ_F))(-e_c^T R_i^T P_β_l/d)
+        grad_p_P_i_l = (1 / (1 - cos_psi_F)) * (-e_c.T @ R.T @ P_beta_l / d_il)
+        
+        # φ̇_i^l = ⟨grad_R P_i^l, ω⟩ + ⟨grad_p P_i^l, v⟩
+        phi_dot_i_l = grad_R_P_i_l @ omega + grad_p_P_i_l @ v
+        
+        # Ḃ_i += (Π_{k≠l}(1-φ_i^k))φ̇_i^l
+        B_dot += prod_other * phi_dot_i_l
+    
+    # 安全集合の2階微分の計算（制御入力を除いた部分）
+    # B̈_i = Σ_{l∈L}(-Σ_{j≠l}(Π_{m≠j,l}(1-φ_i^m))φ̇_i^jφ̇_i^l + (Π_{k≠l}(1-φ_i^k))φ̈_i^l)
+    B_ddot_minus = 0.0
+    
+    # 制約行列の初期化
+    if drone.dynamics_model == 'holonomic_dynamics':
+        C_f = np.zeros(3)
+        C_tau = np.zeros(3)
+    else:
+        C_f = 0.0
+        C_tau = np.zeros(3)
+    
+    for i, fp_i in enumerate(visible_features):
+        # Π_{k≠l}(1-φ_i^k)
+        prod_other_i = 1.0
+        for j, phi in enumerate(phi_values):
+            if i != j:
+                prod_other_i *= (1 - phi)
+        
+        # 特徴点の位置
+        q_l_i = fp_i.position
+        
+        # βベクトル（特徴点の方向を表す単位ベクトル）
+        beta_l_i = drone.get_beta_vector(q_l_i)
+        
+        # 投影行列
+        P_beta_l_i = np.eye(3) - np.outer(beta_l_i, beta_l_i)
+        
+        # 距離
+        d_il_i = np.linalg.norm(q_l_i - drone.T.p)
+        
+        # grad_R P_i^l = (1/(1-cos ψ_F))(-β_l^T(p_i) R_i [e_c]_×)
+        grad_R_P_i_l_i = (1 / (1 - cos_psi_F)) * (-beta_l_i.T @ R @ skew(e_c))
+        
+        # grad_p P_i^l = (1/(1-cos ψ_F))(-e_c^T R_i^T P_β_l/d)
+        grad_p_P_i_l_i = (1 / (1 - cos_psi_F)) * (-e_c.T @ R.T @ P_beta_l_i / d_il_i)
+        
+        # φ̇_i^l = ⟨grad_R P_i^l, ω⟩ + ⟨grad_p P_i^l, v⟩
+        phi_dot_i_l_i = grad_R_P_i_l_i @ omega + grad_p_P_i_l_i @ v
+        
+        # -Σ_{j≠l}(Π_{m≠j,l}(1-φ_i^m))φ̇_i^jφ̇_i^l
+        term1 = 0.0
+        for j, fp_j in enumerate(visible_features):
+            if i != j:
+                # Π_{m≠j,l}(1-φ_i^m)
+                prod_other_j = 1.0
+                for k, phi in enumerate(phi_values):
+                    if k != i and k != j:
+                        prod_other_j *= (1 - phi)
+                
+                # 特徴点の位置
+                q_l_j = fp_j.position
+                
+                # βベクトル（特徴点の方向を表す単位ベクトル）
+                beta_l_j = drone.get_beta_vector(q_l_j)
+                
+                # 投影行列
+                P_beta_l_j = np.eye(3) - np.outer(beta_l_j, beta_l_j)
+                
+                # 距離
+                d_il_j = np.linalg.norm(q_l_j - drone.T.p)
+                
+                # grad_R P_i^l = (1/(1-cos ψ_F))(-β_l^T(p_i) R_i [e_c]_×)
+                grad_R_P_i_l_j = (1 / (1 - cos_psi_F)) * (-beta_l_j.T @ R @ skew(e_c))
+                
+                # grad_p P_i^l = (1/(1-cos ψ_F))(-e_c^T R_i^T P_β_l/d)
+                grad_p_P_i_l_j = (1 / (1 - cos_psi_F)) * (-e_c.T @ R.T @ P_beta_l_j / d_il_j)
+                
+                # φ̇_i^l = ⟨grad_R P_i^l, ω⟩ + ⟨grad_p P_i^l, v⟩
+                phi_dot_i_l_j = grad_R_P_i_l_j @ omega + grad_p_P_i_l_j @ v
+                
+                term1 -= prod_other_j * phi_dot_i_l_j * phi_dot_i_l_i
+        
+        # φ̈_i^l = ⟨Hess P_i^l[ξ_W], ξ_W⟩ + ⟨grad P_i^l, ξ̇_W⟩
+        # ⟨Hess P_i^l[ξ_W], ξ_W⟩ = ⟨Hess_p P_i^l[v], v⟩ + ⟨Hess_p P_i^l[v], ω⟩ + ⟨Hess_R P_i^l[ω], v⟩ + ⟨Hess_R P_i^l[ω], ω⟩
+        
+        # ヘッシアン項の計算
+        z = R @ e_c
+        
+        # ⟨Hess_p P_i^l[v], v⟩
+        term_hess_p_v = (1 / (1 - cos_psi_F)) * (-v.T @ R.T @ ((beta_l_i @ (z.T @ P_beta_l_i) + (z.T @ beta_l_i) * P_beta_l_i + P_beta_l_i @ z @ beta_l_i.T) / d_il_i**2) @ R @ v - (z.T @ P_beta_l_i @ R @ skew(omega) / d_il_i) @ v)
+        
+        # ⟨Hess_p P_i^l[v], ω⟩ = ⟨Hess_R P_i^l[ω], v⟩
+        term_hess_p_omega = (1 / (1 - cos_psi_F)) * (v.T @ R.T @ P_beta_l_i @ R @ skew(e_c) @ omega / d_il_i)
+        
+        # ⟨Hess_R P_i^l[ω], ω⟩
+        term_hess_R_omega = (1 / (1 - cos_psi_F)) * (-beta_l_i.T @ (R @ skew(omega)) @ skew(e_c) @ omega)
+        
+        # ⟨Hess P_i^l[ξ_W], ξ_W⟩
+        term_hess = term_hess_p_v + term_hess_p_omega + term_hess_p_omega + term_hess_R_omega
+        
+        # ⟨grad P_i^l, ξ̇_W⟩ = ⟨grad_p P_i^l, v̇⟩ + ⟨grad_R P_i^l, ω̇⟩
+        # v̇ = v×ω - gR^Te_z + M^{-1}f
+        # ω̇ = J^{-1}τ
+        
+        # 重力項
+        A_g = np.cross(v, omega) - np.dot(R.T, g)
+        
+        # ⟨grad_p P_i^l, A_g⟩
+        term_grad_p_Ag = grad_p_P_i_l_i @ A_g
+        
+        # 制約行列の計算
+        # C_f: 推力に関する係数
+        if drone.dynamics_model == 'holonomic_dynamics':
+            # ホロノミック系の場合（3次元ベクトル）
+            C_f_i = prod_other_i * grad_p_P_i_l_i * (1 / M)
+            C_f += C_f_i
+        else:
+            # 非ホロノミック系の場合（スカラー）
+            C_f_i = prod_other_i * grad_p_P_i_l_i @ np.array([0, 0, 1]) / M
+            C_f += C_f_i
+        
+        # C_tau: トルクに関する係数
+        C_tau_i = prod_other_i * grad_R_P_i_l_i @ np.linalg.inv(drone.J)
+        C_tau += C_tau_i
+        
+        # 項の合計
+        B_ddot_minus += term1 + prod_other_i * term_hess + prod_other_i * term_grad_p_Ag
+    
+    # 制約行列の構築
+    if drone.dynamics_model == 'holonomic_dynamics':
+        # ホロノミック系の場合
+        C = np.zeros(6)
+        C[0:3] = C_f
+        C[3:6] = C_tau
+    else:
+        # 非ホロノミック系の場合
+        C = np.zeros(4)
+        C[0] = C_f
+        C[1:4] = C_tau
+    
+    # 右辺の計算
+    b = B_ddot_minus + (gamma0 + gamma1) * B_dot + (gamma0 * gamma1) * B
     
     return C, b, B, B_dot, B_ddot_minus
 

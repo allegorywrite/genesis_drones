@@ -28,8 +28,8 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
     use_cbf : bool, optional
         CBF制約を使用するかどうか（デフォルトはFalse）
     cbf_method : str, optional
-        CBF制約の方法: 'point'（単一特徴点に対するCBF）（デフォルトは'point'）
-        注: 2次系モデルでは現在、単一特徴点のみサポート
+        CBF制約の方法: 'pcl'（複数特徴点に対するCBF）または
+        'point'（単一特徴点に対するCBF）（デフォルトは'point'）
     hocbf_visualizer : HOCBFVisualizer, optional
         HOCBFの可視化クラス（デフォルトはNone）
     
@@ -40,6 +40,18 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
     """
     # 目標軌道かどうかを判定
     is_trajectory = isinstance(target_trajectory, np.ndarray) and len(target_trajectory.shape) == 2
+    
+    # 入力制約の設定
+    if drone.dynamics_model == 'holonomic_dynamics':
+        # ホロノミック系の場合
+        # u_min = np.array([-100.0, -100.0, -100.0, -100.0, -100.0, -100.0])  # [f_min, tau_min]
+        # u_max = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0])  # [f_max, tau_max]
+        u_min = np.array([-1000.0, -1000.0, -1000.0, -5000.0, -5000.0, -5000.0])  # [f_min, tau_min]
+        u_max = np.array([1000.0, 1000.0, 1000.0, 5000.0, 5000.0, 5000.0])  # [f_max, tau_max]
+    else:
+        # 非ホロノミック系の場合
+        u_min = np.array([-1000.0, -5000.0, -5000.0, -5000.0])  # [f_min, tau_min]
+        u_max = np.array([1000.0, 5000.0, 5000.0, 5000.0])  # [f_max, tau_max]
     
     def drone_input_func(drone, frame):
         # 現在のフレームに対応する目標位置を取得
@@ -58,25 +70,9 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
         
         # CBF制約を使用する場合
         if use_cbf:
-            # 特徴点の中で視野内にあるものを取得
-            visible_features = []
-            for fp in feature_points:
-                if drone.is_point_visible(fp.position):
-                    visible_features.append(fp)
-            
-            # 視野内の特徴点がない場合は制約なしQPを解く
-            if not visible_features:
-                print("警告: 視野内に特徴点がありません")
-                # 目標位置追従のための制御入力を計算
-                u_des = compute_position_tracking_acceleration_control(drone, current_target)
-                return u_des, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            
-            # 単一特徴点に対するHOCBF
-            feature = visible_features[0]
-            
             # HOCBFのゲイン
-            gamma0 = 3.0
-            gamma1 = 3.0
+            gamma0 = 1.0
+            gamma1 = 1.0
             Q1 = np.eye(3)
             Q2 = np.eye(6)
             Q2[0:3, 0:3] = np.eye(3)*0.0000001 # 推力
@@ -84,8 +80,9 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
             
             # QP問題を解く
             u, constraint_value, B_val, B_dot_val, B_ddot_val = solve_dynamic_qp(
-                drone, feature, current_target, use_cbf=True, 
-                gamma0=gamma0, gamma1=gamma1, Q1=Q1, Q2=Q2
+                drone, feature_points, current_target, use_cbf=True, cbf_method=cbf_method,
+                gamma0=gamma0, gamma1=gamma1, Q1=Q1, Q2=Q2,
+                u_min=u_min, u_max=u_max
             )
             # print(f"制御入力: {u}")
             if constraint_value is not None:
@@ -95,15 +92,17 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
                 _, B_dot_prev, _ = hocbf_visualizer.get_previous_values()
                 ref1_value = (B_dot_val - B_dot_prev) / dt
                 ref2_value = B_ddot_val
+                # ref2_value = B_ddot_minus_val
                 hocbf_visualizer.update(B_val, B_dot_val, B_ddot_val, gamma0, gamma1)
                 return u, ref1_value, constraint_margin, ref2_value, B_val, B_dot_val, B_ddot_val
             
             # HOCBFの可視化がない場合、またはB_val, B_dot_val, B_ddot_valがNoneの場合
             return u, 0.0, constraint_margin, 0.0, 0.0, 0.0, 0.0
         else:
-            # 制約なしの場合も制約なしQPを解く
+            # 制約なしの場合も入力制約付きQPを解く
             u, _, _, _, _ = solve_dynamic_qp(
-                drone, None, current_target, use_cbf=False, h=dt
+                drone, feature_points, current_target, use_cbf=False, h=dt,
+                u_min=u_min, u_max=u_max
             )
             return u, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
     

@@ -245,7 +245,8 @@ class DynamicDrone(Drone):
         self.T.R = Rotation.from_quat(quat).as_matrix()
         
         # 並進の更新
-        self.v = self.v + dt * (np.cross(self.v, self.omega) - self.T.R.T @ self.g + f / self.M[0, 0])
+        # self.v = self.v + dt * (np.cross(self.v, self.omega) - self.T.R.T @ self.g + f / self.M[0, 0])
+        self.v = self.v + dt * (self.T.R.T @ self.g + f / self.M[0, 0])
         self.T.p = self.T.p + dt * self.T.R @ self.v
 
 class FeaturePoint:

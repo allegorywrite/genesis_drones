@@ -65,7 +65,7 @@ class SingleDroneVisualizer:
         self.ax_safety.set_title(r'Safety Value $(B_i \geq 0)$')
         self.ax_safety.grid(True)
         self.safety_line, = self.ax_safety.plot([], [], 'r-', linewidth=2, label=r'$B_i$')
-        # self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label=r'$\dot B+\gamma_0 B$')
+        self.ax_dot_line, = self.ax_safety.plot([], [], 'g--', linewidth=2, label=r'$\dot B+\gamma_0 B$')
         self.ax_safety.legend()
         
         # 制約余裕のプロット設定
@@ -227,12 +227,14 @@ class SingleDroneVisualizer:
         
         # プロットを更新
         self.safety_line.set_data(self.time_values, self.gamma_values)
-        # self.ax_dot_line.set_data(self.time_values, self.ax_values)
+        self.ax_dot_line.set_data(self.time_values, self.ax_values)
         self.constraint_line.set_data(self.time_values, self.constraint_margin_values)
         
         # 軸の範囲を自動調整
         self.ax_safety.relim()
         self.ax_safety.autoscale_view()
+        #y軸の範囲を設定
+        # self.ax_safety.set_ylim(-0.5, 0.5)
         
         self.ax_constraint.relim()
         self.ax_constraint.autoscale_view()
@@ -541,7 +543,7 @@ class SingleDroneVisualizer:
             if self.target_trajectory_artist is not None:
                 artists.append(self.target_trajectory_artist)
             artists.append(self.safety_line)
-            # artists.append(self.ax_dot_line)
+            artists.append(self.ax_dot_line)
             artists.append(self.constraint_line)
             
             return artists

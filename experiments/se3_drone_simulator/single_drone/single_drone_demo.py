@@ -71,10 +71,13 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         
     elif trajectory_type == 'snake':
         # 点群に向かう進行方向に対して垂直に周波数成分を持つ軌道
-        # 初期位置（ドローンの初期位置付近）
-        start_point = np.array([0.0, -5.0, 0.0])
+        # # 初期位置（ドローンの初期位置付近）
+        # start_point = np.array([0.0, -5.0, 0.0])
+        # # 目標位置（特徴点の中心付近）
+        # end_point = np.array([0.0, -3.0, 0.0])
+        start_point = np.array([-5.0, -5.0, 0.0])
         # 目標位置（特徴点の中心付近）
-        end_point = np.array([0.0, 3.0, 0.0])
+        end_point = np.array([5.0, -5.0, 0.0])
         
         # 進行方向ベクトル
         direction = end_point - start_point
@@ -91,7 +94,8 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
             trajectory[:, i] = start_point[i] + (end_point[i] - start_point[i]) * t
         
         # 進行方向に垂直な方向に周波数成分（サイン波）を追加
-        amplitude = 3.0  # 振幅
+        # amplitude = 3.0  # 振幅
+        amplitude = 0.1
         frequency = 2.0  # 周波数
         
         # サイン波の周波数成分
@@ -103,10 +107,14 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
 
     elif trajectory_type == 'snake_3d':
         # 蛇行しながら点群に向かう軌道
+        # # 初期位置（ドローンの初期位置付近）
+        # start_point = np.array([0.0, -5.0, 0.0])
+        # # 目標位置（特徴点の中心付近）
+        # end_point = np.array([0.0, 3.0, 0.0])
         # 初期位置（ドローンの初期位置付近）
-        start_point = np.array([0.0, -5.0, 0.0])
+        start_point = np.array([-3.0, -5.0, 0.0])
         # 目標位置（特徴点の中心付近）
-        end_point = np.array([0.0, 3.0, 0.0])
+        end_point = np.array([3.0, -5.0, 0.0])
         
         # 直線的に進む成分
         for i in range(3):
@@ -117,7 +125,8 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         freq = 3.0
         
         # 蛇行の振幅
-        amplitude = 3.0
+        # amplitude = 3.0
+        amplitude = 0.1
     
         # y軸に絶対に蛇行せず固定値で進む
         trajectory[:, 1] += (end_point[1] - start_point[1]) / num_frames
@@ -207,16 +216,15 @@ def main():
         camera_direction = np.array([0, 1, 0])
         # ドローンの初期位置を軌道の始点に合わせる
         T = SE3(R=np.eye(3), p=target_position)
-        drone = DynamicDrone(fov_angle=np.pi/6, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
+        drone = DynamicDrone(fov_angle=np.pi/8, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
         print("2次系モデル（動力学モデル）を使用します")
     else:
-        drone = Drone(fov_angle=np.pi/6)
+        drone = Drone(fov_angle=np.pi/8)
         print("1次系モデル（運動学モデル）を使用します")
         # ドローンの初期位置を軌道の始点に設定
         drone.position = target_position.copy()
         # 初期位置と姿勢を特徴点が視野内に入るように設定（カメラ方向のみ）
         setup_drone_initial_pose(drone, feature_area_center)
-    
     
     # 可視化の初期化（目標位置を設定）
     visualizer = SingleDroneVisualizer(

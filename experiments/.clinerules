@@ -1,9 +1,9 @@
 ### タスク
-se3_drone_simulator/single_drone/single_drone_demo.py
-を参考にして，se3_drone_simulator/multi_drones/main.py
-のシミュレーションに以下の修正を加えてください．
-・目標軌道を生成し，目標位置を更新してください
-・snake軌道を横並びに配置してください
+doc/develop_dynamics.md
+及びse3_drone_simulator/single_drone/controller.py
+のdrone_input_funcを参考にして，
+dynamics, holonomic_dynamicsにおいても
+複数特徴点(pcl)の場合に対応してください．
 
 ### 実装規則
 ・あなたは出力文字数が一定値を超えると途切れるようになっています．長い文章及びコードを出力する場合は，適宜区切り，write_in_fileではなくreplace_in_fileを用いてファイルを更新してください．

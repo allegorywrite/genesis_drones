@@ -392,8 +392,8 @@ def compute_dynamic_objective_coefficients(drone, p_des, Q1=None, Q2=None, h=0.0
         A[:, 0:3] = -h**2 * np.linalg.inv(drone.M)[0, 0] * drone.T.R
         
         # トルクに関する項
-        for i in range(3):
-            A[:, i+3] = h**3 * np.cross(drone.v, np.linalg.inv(drone.J)[i, :])
+        # for i in range(3):
+        #     A[:, i+3] = h**3 * np.cross(drone.v, np.linalg.inv(drone.J)[i, :])
         
         # 修正された誤差項
         tilde_e_k = e_i + h**2 * get_gravity()  # 重力補正
@@ -475,7 +475,8 @@ def compute_dynamic_objective_coefficients(drone, p_des, Q1=None, Q2=None, h=0.0
     return H, f
 
 
-def solve_dynamic_qp(drone, feature_point, p_des, use_cbf=False, gamma0=0.1, gamma1=0.1, Q1=None, Q2=None, h=0.01):
+def solve_dynamic_qp(drone, feature_points, p_des, use_cbf=False, cbf_method='point', gamma0=0.1, gamma1=0.1, Q1=None, Q2=None, h=0.01, 
+                    u_min=None, u_max=None):
     """
     2次系モデルのQP問題を解く
     
@@ -483,12 +484,15 @@ def solve_dynamic_qp(drone, feature_point, p_des, use_cbf=False, gamma0=0.1, gam
     -----------
     drone : DynamicDrone
         2次系ドローン
-    feature_point : FeaturePoint
-        視野内の特徴点（CBF制約を使用する場合）
+    feature_points : list of FeaturePoint
+        視野内の特徴点のリスト（CBF制約を使用する場合）
     p_des : array_like, shape (3,)
         目標位置
     use_cbf : bool, optional
         CBF制約を使用するかどうか（デフォルトはFalse）
+    cbf_method : str, optional
+        CBF制約の方法: 'pcl'（複数特徴点に対するCBF）または
+        'point'（単一特徴点に対するCBF）（デフォルトは'point'）
     gamma0 : float, optional
         CBFのゲイン0（デフォルトは0.1）
     gamma1 : float, optional
@@ -499,6 +503,14 @@ def solve_dynamic_qp(drone, feature_point, p_des, use_cbf=False, gamma0=0.1, gam
         制御入力の重み行列（デフォルトは単位行列）
     h : float, optional
         時間ステップ（デフォルトは0.01）
+    u_min : array_like, optional
+        制御入力の最小値（デフォルトはNone）
+        ホロノミック系の場合: shape (6,), [f_min, tau_min]
+        非ホロノミック系の場合: shape (4,), [f_min, tau_min]
+    u_max : array_like, optional
+        制御入力の最大値（デフォルトはNone）
+        ホロノミック系の場合: shape (6,), [f_max, tau_max]
+        非ホロノミック系の場合: shape (4,), [f_max, tau_max]
         
     Returns:
     --------
@@ -512,61 +524,153 @@ def solve_dynamic_qp(drone, feature_point, p_des, use_cbf=False, gamma0=0.1, gam
     # 目的関数の係数を計算
     H, f = compute_dynamic_objective_coefficients(drone, p_des, Q1, Q2, h)
     
+    # 入力の次元を決定
+    if drone.dynamics_model == 'holonomic_dynamics':
+        # ホロノミック系の場合
+        input_dim = 6
+    else:
+        # 非ホロノミック系の場合
+        input_dim = 4
+    
+    # 入力制約のデフォルト値を設定
+    if u_min is None:
+        if drone.dynamics_model == 'holonomic_dynamics':
+            # ホロノミック系の場合
+            u_min = np.array([-10.0, -10.0, -10.0, -5.0, -5.0, -5.0])  # [f_min, tau_min]
+        else:
+            # 非ホロノミック系の場合
+            u_min = np.array([0.0, -5.0, -5.0, -5.0])  # [f_min, tau_min]
+    
+    if u_max is None:
+        if drone.dynamics_model == 'holonomic_dynamics':
+            # ホロノミック系の場合
+            u_max = np.array([10.0, 10.0, 10.0, 5.0, 5.0, 5.0])  # [f_max, tau_max]
+        else:
+            # 非ホロノミック系の場合
+            u_max = np.array([20.0, 5.0, 5.0, 5.0])  # [f_max, tau_max]
+    
+    # 入力制約の行列を構築
+    # [I; -I] * u <= [u_max; -u_min]
+    I = np.eye(input_dim)
+    G_input = np.vstack([I, -I])
+    h_input = np.hstack([u_max, -u_min])
+    
     # CBF制約を使用する場合
-    if use_cbf and feature_point is not None:
-        # HOCBFの係数を計算
-        C, b, B, B_dot, B_ddot_minus = compute_hocbf_single_point_coefficients(drone, feature_point, gamma0, gamma1)
+    if use_cbf and feature_points:
+        # 特徴点の中で視野内にあるものを取得
+        visible_features = []
+        for fp in feature_points:
+            if drone.is_point_visible(fp.position):
+                visible_features.append(fp)
+        
+        # 視野内の特徴点がない場合は制約なしQPを解く
+        if not visible_features:
+            print("警告: 視野内に特徴点がありません")
+            # 入力制約のみのQP問題を解く
+            P = cvxopt.matrix(H)
+            q = cvxopt.matrix(f)
+            G_cvx = cvxopt.matrix(G_input)
+            h_cvx = cvxopt.matrix(h_input)
+            
+            try:
+                sol = cvxopt.solvers.qp(P, q, G_cvx, h_cvx)
+                # 解が見つかった場合
+                if sol['status'] == 'optimal':
+                    u = np.array(sol['x']).flatten()
+                    return u, None, None, None, None
+                else:
+                    print(f"警告: QP問題の解決に失敗しました: {sol['status']}")
+                    # 目標位置追従のための制御入力を計算
+                    from .cbf_se3 import compute_position_tracking_acceleration_control
+                    u_des = compute_position_tracking_acceleration_control(drone, p_des)
+                    # 入力制約を適用
+                    u_des = np.clip(u_des, u_min, u_max)
+                    return u_des, None, None, None, None
+            except Exception as e:
+                print(f"警告: QP問題の解決中にエラーが発生しました: {e}")
+                # 目標位置追従のための制御入力を計算
+                from .cbf_se3 import compute_position_tracking_acceleration_control
+                u_des = compute_position_tracking_acceleration_control(drone, p_des)
+                # 入力制約を適用
+                u_des = np.clip(u_des, u_min, u_max)
+                return u_des, None, None, None, None
+        
+        # CBF制約の係数を計算
+        if cbf_method == 'pcl':
+            # 複数特徴点に対するHOCBF
+            from .cbf_se3 import compute_hocbf_multi_point_coefficients
+            C, b, B, B_dot, B_ddot_minus = compute_hocbf_multi_point_coefficients(drone, visible_features, q=0.5, gamma0=gamma0, gamma1=gamma1)
+        else:  # cbf_method == 'point'
+            # 単一特徴点に対するHOCBF
+            from .cbf_se3 import compute_hocbf_single_point_coefficients
+            feature_point = visible_features[0]
+            C, b, B, B_dot, B_ddot_minus = compute_hocbf_single_point_coefficients(drone, feature_point, gamma0, gamma1)
         
         # 制約行列の構築
         if drone.dynamics_model == 'holonomic_dynamics':
             # ホロノミック系の場合
-            A = np.zeros((1, 6))
-            A[0, :] = C
+            A_cbf = np.zeros((1, 6))
+            A_cbf[0, :] = C
         else:
             # 非ホロノミック系の場合
-            A = np.zeros((1, 4))
-            A[0, :] = C
+            A_cbf = np.zeros((1, 4))
+            A_cbf[0, :] = C
         
         # 制約の右辺
-        b_arr = np.array([b])
+        b_cbf = np.array([b])
+        
+        # 入力制約とCBF制約を結合
+        G = np.vstack([G_input, A_cbf])
+        h_arr = np.hstack([h_input, b_cbf])
         
         # cvxoptの形式に変換
         P = cvxopt.matrix(H)
         q = cvxopt.matrix(f)
-        G = cvxopt.matrix(A)
-        h_cvx = cvxopt.matrix(b_arr)
+        G_cvx = cvxopt.matrix(G)
+        h_cvx = cvxopt.matrix(h_arr)
         
         # 制約付きQP問題を解く
         try:
-            sol = cvxopt.solvers.qp(P, q, G, h_cvx)
+            sol = cvxopt.solvers.qp(P, q, G_cvx, h_cvx)
             # 解が見つかった場合
             if sol['status'] == 'optimal':
                 u = np.array(sol['x']).flatten()
+                print(f"制御入力: {u}")
                 # 制約値と制約余裕を計算
-                Cu_value = np.dot(A, u)
+                Cu_value = np.dot(A_cbf, u)
+                print(f"Cu_value: {Cu_value}")
+                # print(f"A_cbf: {A_cbf}")
                 constraint_value = float(b - Cu_value)
                 # for debug
                 # u = np.array([9.81, 0.0, 1.0, 0.0])
                 B_ddot = B_ddot_minus - C @ u
+                # print(f"B_ddot: {B_ddot}, B_ddot_minus: {B_ddot_minus}")
                 return u, constraint_value, B, B_dot, B_ddot
             else:
                 print(f"警告: QP問題の解決に失敗しました: {sol['status']}")
                 # 目標位置追従のための制御入力を計算
                 from .cbf_se3 import compute_position_tracking_acceleration_control
                 u_des = compute_position_tracking_acceleration_control(drone, p_des)
+                # 入力制約を適用
+                u_des = np.clip(u_des, u_min, u_max)
                 return u_des, None, None, None, None
         except Exception as e:
             print(f"警告: QP問題の解決中にエラーが発生しました: {e}")
             # 目標位置追従のための制御入力を計算
             from .cbf_se3 import compute_position_tracking_acceleration_control
             u_des = compute_position_tracking_acceleration_control(drone, p_des)
+            # 入力制約を適用
+            u_des = np.clip(u_des, u_min, u_max)
             return u_des, None, None, None, None
     else:
-        # 制約なしQP問題を解く
+        # 入力制約のみのQP問題を解く
         P = cvxopt.matrix(H)
         q = cvxopt.matrix(f)
+        G_cvx = cvxopt.matrix(G_input)
+        h_cvx = cvxopt.matrix(h_input)
+        
         try:
-            sol = cvxopt.solvers.qp(P, q)
+            sol = cvxopt.solvers.qp(P, q, G_cvx, h_cvx)
             # 解が見つかった場合
             if sol['status'] == 'optimal':
                 u = np.array(sol['x']).flatten()
@@ -576,12 +680,16 @@ def solve_dynamic_qp(drone, feature_point, p_des, use_cbf=False, gamma0=0.1, gam
                 # 目標位置追従のための制御入力を計算
                 from .cbf_se3 import compute_position_tracking_acceleration_control
                 u_des = compute_position_tracking_acceleration_control(drone, p_des)
+                # 入力制約を適用
+                u_des = np.clip(u_des, u_min, u_max)
                 return u_des, None, None, None, None
         except Exception as e:
             print(f"警告: QP問題の解決中にエラーが発生しました: {e}")
             # 目標位置追従のための制御入力を計算
             from .cbf_se3 import compute_position_tracking_acceleration_control
             u_des = compute_position_tracking_acceleration_control(drone, p_des)
+            # 入力制約を適用
+            u_des = np.clip(u_des, u_min, u_max)
             return u_des, None, None, None, None
 
 
