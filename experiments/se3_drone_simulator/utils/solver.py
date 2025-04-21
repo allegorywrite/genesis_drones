@@ -635,6 +635,9 @@ def solve_dynamic_qp(drone, feature_points, p_des, use_cbf=False, cbf_method='po
             # 解が見つかった場合
             if sol['status'] == 'optimal':
                 u = np.array(sol['x']).flatten()
+                # for debug
+                # u = np.array([10.0, 10.0, 0.0, 0.0, 0.0, 1.0])
+                u = np.zeros(6)
                 print(f"制御入力: {u}")
                 # 制約値と制約余裕を計算
                 Cu_value = np.dot(A_cbf, u)

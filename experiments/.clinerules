@@ -1,9 +1,12 @@
 ### タスク
-doc/develop_dynamics.md
-及びse3_drone_simulator/single_drone/controller.py
-のdrone_input_funcを参考にして，
-dynamics, holonomic_dynamicsにおいても
-複数特徴点(pcl)の場合に対応してください．
+experiments/doc/develop_kinematics.md
+の自己位置推定のためのCBFを元に，
+experiments/se3_drone_simulator/multi_drones/main.py
+に新たなCBF関数を追加したオプションを用意してください．以下の点に留意してください．
+・ランダムサンプリングによる初期姿勢の決定においても，オプションに応じて使用する安全集合を変更してください．
+・可視化の際は，もともとの値に加えて追加したCBF関数の安全集合の値及び制約余裕をプロットする様にしてください．
+・新たな関数の追加はexperiments/se3_drone_simulator/run_multi_drones.shのオプションで選択できるようにしてください．
+・まずは集中型の場合のみ実装してください．
 
 ### 実装規則
 ・あなたは出力文字数が一定値を超えると途切れるようになっています．長い文章及びコードを出力する場合は，適宜区切り，write_in_fileではなくreplace_in_fileを用いてファイルを更新してください．

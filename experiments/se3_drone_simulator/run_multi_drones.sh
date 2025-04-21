@@ -10,14 +10,14 @@ GAMMA=0.1
 C1=0.5
 C2=0.5
 H=0.02
-OPTIMIZATION_METHOD="distributed"
-# OPTIMIZATION_METHOD="centralized"
+# OPTIMIZATION_METHOD="distributed"
+OPTIMIZATION_METHOD="centralized"
 C=1.0
 MAX_ITER=10
 KEEP_FOV_HISTORY=true
 FOV_SAVE_INTERVAL=30
 DYNAMICS_MODEL="kinematics"  # 動力学モデル（kinematics または dynamics）
-TRAJECTORY_TYPE="fixed"      # 軌道タイプ（circle, eight, lissajous, snake, snake_3d, step, fixed）
+TRAJECTORY_TYPE="snake"      # 軌道タイプ（circle, eight, lissajous, snake, snake_3d, step, fixed）
 
 # コマンドライン引数の解析
 while [[ $# -gt 0 ]]; do

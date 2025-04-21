@@ -71,11 +71,15 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
         # CBF制約を使用する場合
         if use_cbf:
             # HOCBFのゲイン
-            gamma0 = 1.0
-            gamma1 = 1.0
+            # gamma0 = 1.0
+            # gamma1 = 1.0
+            gamma0 = 0.1
+            gamma1 = 0.1
             Q1 = np.eye(3)
             Q2 = np.eye(6)
-            Q2[0:3, 0:3] = np.eye(3)*0.0000001 # 推力
+            # Q2[0:3, 0:3] = np.eye(3)*0.0000001 # 推力
+            # Q2[3:6, 3:6] = np.eye(3)*0.000005 # トルク
+            Q2[0:3, 0:3] = np.eye(3)*0.00001 # 推力
             Q2[3:6, 3:6] = np.eye(3)*0.000005 # トルク
             
             # QP問題を解く
@@ -92,6 +96,10 @@ def create_dynamic_drone_input_func(drone, feature_points, target_trajectory, us
                 _, B_dot_prev, _ = hocbf_visualizer.get_previous_values()
                 ref1_value = (B_dot_val - B_dot_prev) / dt
                 ref2_value = B_ddot_val
+                print("B_ddot_cal:", (B_dot_val - B_dot_prev) / dt)
+                print("dt:", dt)
+                print("B_ddot_val:", B_ddot_val)
+                print("Calculated Error:", ref1_value - ref2_value)
                 # ref2_value = B_ddot_minus_val
                 hocbf_visualizer.update(B_val, B_dot_val, B_ddot_val, gamma0, gamma1)
                 return u, ref1_value, constraint_margin, ref2_value, B_val, B_dot_val, B_ddot_val

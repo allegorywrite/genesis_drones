@@ -163,19 +163,19 @@ $$
 $$
 ここで
 $$
-\dot{P}_\beta = \frac{P_\beta\,v}{d}\,\beta^\top + \beta\,\frac{v^\top\,P_\beta}{d}
+\dot{P}_\beta = \frac{P_\beta\,Rv}{d}\,\beta^\top + \beta\,\frac{R^\top v^\top\,P_\beta}{d}
 $$
 より、各エージェント $i$ について
 $$
-\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{1}{d_i^2}\left(\frac{P_{\beta_i}\,v_i}{d_i}\,\beta_i^\top + \beta_i\,\frac{v_i^\top\,P_{\beta_i}}{d_i}\right) -\frac{2(-\beta_i^\top v_i)}{d_i^3}\,P_{\beta_i}
+\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{1}{d_i^2}\left(\frac{P_{\beta_i}\,R_iv_i}{d_i}\,\beta_i^\top + \beta_i\,\frac{R_i^\top v_i^\top\,P_{\beta_i}}{d_i}\right) -\frac{2(-\beta_i^\top R_i v_i)}{d_i^3}\,P_{\beta_i}
 $$
 すなわち、
 $$
-\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{P_{\beta_i}\,v_i\,\beta_i^\top + \beta_i\,v_i^\top\,P_{\beta_i}}{d_i^3} +\frac{2(\beta_i^\top v_i)}{d_i^3}\,P_{\beta_i}
+\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{P_{\beta_i}\,R_iv_i\,\beta_i^\top + \beta_i\,R_i^\top v_i^\top\,P_{\beta_i}}{d_i^3} +\frac{2(\beta_i^\top R_iv_i)}{d_i^3}\,P_{\beta_i}
 $$
 ゆえに、
 $$
-\dot{M} = \frac{P_{\beta_i}\,v_i\,\beta_i^\top + \beta_i\,v_i^\top\,P_{\beta_i} + 2(\beta_i^\top v_i)\,P_{\beta_i}}{d_i^3} +\frac{P_{\beta_j}\,v_j\,\beta_j^\top + \beta_j\,v_j^\top\,P_{\beta_j} + 2(\beta_j^\top v_j)\,P_{\beta_j}}{d_j^3}
+\dot{M} = \frac{P_{\beta_i}\,R_iv_i\,\beta_i^\top + \beta_i\,R_i^\top v_i^\top\,P_{\beta_i} + 2(\beta_i^\top R_iv_i)\,P_{\beta_i}}{d_i^3} +\frac{P_{\beta_j}\,R_jv_j\,\beta_j^\top + \beta_j\,R_j^\top v_j^\top\,P_{\beta_j} + 2(\beta_j^\top R_jv_j)\,P_{\beta_j}}{d_j^3}
 $$
 以上をまとめると、スカラー化した確率関数
 $$
@@ -186,6 +186,96 @@ $$
 \dot{{P}}_{ij}^l = \frac{\sigma^2}{f^2}\,{P}_{ij}^l\,\operatorname{tr}\Bigl(M^{-1}\,\dot{M}\,M^{-1}\Bigr)
 $$
 であり、ここで $\dot{M}$ は上記の通り各エージェントの項の和として求まる。
+### 制御入力に関する線形化
+
+確率関数をCBFに適用するには，確率関数の時間微分を制御入力$v_i, v_j$についての線形な関数に変換する必要がある．ここで
+$$
+\begin{aligned}
+\dot P_{ij}^l
+&= -\frac{\sigma^2}{f^2}\,P_{ij}^l\,\dot T,\\
+\dot T
+&= \mathrm{tr}\left((M^{-1})^{\cdot}\right)
+= -\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right).
+\end{aligned}
+$$
+
+ただし$M$は各エージェント $k\in\{i,j\}$ の速度を $w_k=R_k v_k$ とし
+$$
+\begin{aligned}
+\dot M
+&=\sum_{k\in\{i,j\}}
+\frac{\mathrm d}{\mathrm dt}\left(\tfrac{P_{\beta_k}}{d_k^2}\right)\\
+&=\sum_{k}
+\frac{1}{d_k^2}\dot P_{\beta_k}
+-\frac{2\dot d_k}{d_k^3}P_{\beta_k}\\
+&=\sum_{k}
+\frac{1}{d_k^3}\left[
+P_{\beta_k}w_k\beta_k^\top
++\beta_k w_k^\top P_{\beta_k}
++2(\beta_k^\top w_k)P_{\beta_k}
+\right].
+\end{aligned}
+$$
+のように時間微分を計算することができる．
+
+また，トレース演算は以下
+$$
+\begin{aligned}
+&\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right)\\
+&=\sum_{k\in\{i,j\}}
+\frac{1}{d_k^3}\left[
+\underbrace{\mathrm{tr}(M^{-1}P_{\beta_k}w_k\beta_k^\top M^{-1})}_{t_{k,1}}
++\underbrace{\mathrm{tr}(M^{-1}\beta_k w_k^\top P_{\beta_k}M^{-1})}_{t_{k,2}}
++\underbrace{2(\beta_k^\top w_k)\mathrm{tr}(M^{-1}P_{\beta_k}M^{-1})}_{t_{k,3}}
+\right].
+\end{aligned}
+$$
+のように分解できる．ただし各項は
+$\mathrm{tr}(A\,x\,y^\top\,B)=y^\top B A x$
+により
+$$
+\begin{aligned}
+t_{k,1}&=w_k^\top P_{\beta_k}M^{-2}\beta_k,\\
+t_{k,2}&=w_k^\top P_{\beta_k}M^{-2}\beta_k,\\
+t_{k,3}&=2(\beta_k^\top w_k)\,\chi_k,\quad
+\chi_k=\mathrm{tr}(M^{-1}P_{\beta_k}M^{-1}).
+\end{aligned}
+$$
+を得る。よって
+$$
+\begin{aligned}
+\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right)
+&=\sum_{k}
+\frac{2}{d_k^3}
+w_k^\top\left(P_{\beta_k}M^{-2}\beta_k + \chi_k\beta_k\right).
+\end{aligned}
+$$
+
+上記の変形により，
+$w_k=R_k v_k$ を組み合わせ，
+$$
+\begin{aligned}
+\dot P_{ij}^l
+&=-\frac{\sigma^2}{f^2}P_{ij}^l\left(-\mathrm{tr}(M^{-1}\dot M\,M^{-1})\right)\\
+&=\sum_{k\in\{i,j\}}
+\lambda_k^\top v_k,
+\end{aligned}
+$$
+$$
+\lambda_k
+:=-\frac{2\sigma^2}{f^2}\,
+\frac{P_{ij}^l}{d_k^3}\,
+R_k^\top\left(P_{\beta_k}M^{-2}\beta_k + \chi_k\beta_k\right).
+$$
+最終的に
+$$
+\begin{aligned}
+\dot P_{ij}^l
+= \lambda_i^\top v_i + \lambda_j^\top v_j
+\end{aligned}
+$$
+が得られる。
+
 一方，ここで確率関数の問題として，角速度$\Omega_i$に依存しないようになってしまうため，視野内に特徴点を留める関数として機能しない．これは，以下の図のように共有視野境界において関数が非連続になることからも理解できる．
 
 **Cramer-Rao関数**
@@ -213,3 +303,4 @@ P_{ij}^l &= \exp(-\frac{\sigma^2}{f^2}\,\mathrm{tr}\left[ \frac{P_{\beta_i}}{d_i
 $$
 ![[Screenshot from 2025-04-15 18-25-18.png]]
 一方で上記の目的は異なるCBFを最適化問題に張れば良い気もするため上記の様に煩雑な関数を用いる意義は不透明である．
+

@@ -474,7 +474,7 @@ def compute_hocbf_single_point_coefficients(drone, feature_point, gamma0=0.1, ga
     # 2階微分項の計算
     z = R @ e_c
 
-    term1 = (beta_l @ (z.T @ P_beta_l) + (z.T @ beta_l)*P_beta_l + P_beta_l @ z @ beta_l.T) / d_il**2
+    term1 = (beta_l @ (z.T @ P_beta_l) + (z.T @ beta_l)*P_beta_l + (P_beta_l @ z) @ beta_l.T) / d_il**2
     term2 = z.T @ P_beta_l @ R @ skew(omega) / d_il
 
     hess_ph_omega = v.T @ R.T @ P_beta_l @ R @ skew(e_c) @ omega / d_il

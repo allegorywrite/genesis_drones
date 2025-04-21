@@ -234,7 +234,7 @@ class SingleDroneVisualizer:
         self.ax_safety.relim()
         self.ax_safety.autoscale_view()
         #y軸の範囲を設定
-        # self.ax_safety.set_ylim(-0.5, 0.5)
+        # self.ax_safety.set_ylim(-1.0, 0.0)
         
         self.ax_constraint.relim()
         self.ax_constraint.autoscale_view()

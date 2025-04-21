@@ -482,3 +482,304 @@ $$
 https://people.kth.se/~dimos/pdfs/DistributedCBF_LCSS_2022.pdf#:~:text=Abstract%E2%80%94%20In%20this%20work%2C%20we,Instead%2C%20to%20solve%20the%20quadratic
 
 最適化中に元の制約式を満たすことを保証する？ADMMベースのCBF分散化手法
+
+
+### 自己位置推定のためのCBF
+
+視野共有を保証するCBFにおいては，
+$$
+\begin{align}
+&\Psi_{i}^l = \left\{ \begin{array}{ll}
+0 & \mathrm{if} \quad  \beta_l^{\top}(p_i)R_ie_c-\cos\Psi_\mathcal{F} < 0\\
+1 & \mathrm{if}  \quad  \beta_l^{\top}(p_i)R_ie_c-\cos\Psi_\mathcal{F} \geq 0
+\end{array} \right.
+\end{align}
+$$
+が微分不可能であることを避けるため
+$q_l\in \mathcal{L}$によってエージェント$i$における推定が成り立っている確率を
+$$
+\phi_{i}^l= P(p_i,R_i,q^l)\tag{15}
+$$
+とした．本研究では簡単のため
+$$
+\begin{align}
+\phi_{ij}^l &= \frac{\beta_l^\top(p_i) R_i e_c -\cos\Psi_\mathcal{F} }{1-\cos\Psi_\mathcal{F}}\frac{\beta_l^\top(p_j) R_j e_c -\cos\Psi_\mathcal{F} }{1-\cos\Psi_\mathcal{F}}
+\end{align}
+$$
+という関数を使用しているが．$P^l_i$が$(p_i, R_i)\in \mathrm{SE(3)}$について微分可能であれば任意の確率関数を設計可能である．今後の目標として，自己位置推定における関数を下限制約することを目的として$\phi^l_{ij}$を設計することを考える．
+
+各エージェント$i \in \mathcal{A}$に対して，観測モデルは
+$$
+\tilde{p}_i = \pi_i(q_l) + w_i
+$$
+と表される．ここで，
+- $\pi_i(q_l)$はエージェント$i$における$q_l$の非線形な投影関数である．一般的なピンホールモデルの場合，画像座標$(u_i, v_i)$は内部パラメータ（焦点距離や主点）や$q_l$の空間的な位置$(X, Y, Z)$と関係する．
+- $w_i$は白色ノイズであり，通常は独立同分布の正規分布$w_i \sim \mathcal{N}(0, \sigma_i^2 I)$（または各エージェントごとに異なる共分散行列を考慮する場合もある）と仮定される．
+
+各観測ノイズが正規分布に従うことから，対数尤度関数は
+$$
+\mathcal{L}(q_l) = -\sum_i \frac{1}{2}(\tilde{p}_i - \pi_i(q_l))^T \Sigma_i^{-1}(\tilde{p}_i - \pi_i(q_l)) + \text{定数}
+$$
+となる．ここで，各$\Sigma_i$は$w_i$の共分散行列である．最尤推定量$\hat{q}_l$はこの対数尤度を最大化する解，または等価に
+$$
+\hat{q}_l = \operatorname*{arg\,min}_{q_l} \sum_i \| \tilde{p}_i - \pi_i(q_l) \|^2_{\Sigma_i^{-1}}
+$$
+を満たす$q_l$として求められる．
+
+投影関数$\pi_i(q_l)$は一般に非線形であるため，解析的に誤差伝搬や不確かさを評価するには，$q_l$の推定値の周りで一階テイラー展開を用いる．
+
+任意の推定点$q_0^l$周りで
+   $$
+   \pi_i(q_l) \approx \pi_i(q_0^l) + J_i (q_l - q_0^l)
+   $$
+と近似する．ここで，$J_i = \frac{\partial \pi_i}{\partial q_l} \Big|_{q_l=q_0^l}$はエージェント$i$における投影関数のヤコビアンである．
+この近似により，観測式は
+   $$
+   \tilde{p}_i \approx \pi_i(q_0^l) + J_i (q_l - q_0^l) + w_i
+   $$
+と表せ，$q_l$に対する線形モデルが得られる．これにより，小さな誤差領域での推定誤差伝搬解析が可能となる．
+
+最尤推定問題において，推定値の下界としてのCramér-Rao Lower Bound (CRLB)は，フィッシャー情報行列$\mathbf{I}(q_l)$を用いて記述される．線形化した場合，FIMは以下の形になる．
+$$
+\mathbf{I}(q_l) = \sum_i J_i^T \Sigma_i^{-1} J_i
+$$
+ここで，各エージェント$i$からの情報が加算されることにより，複数台のカメラを用いることでより高い情報量，すなわち低い推定誤差が期待できる．
+
+CRLBより，任意の不偏推定量$\hat{q}_l$の共分散行列は次の下界を満たす：
+$$
+\operatorname{Cov}(\hat{q}_l) \ge \mathbf{I}(q_l)^{-1} = \left( \sum_i J_i^T \Sigma_i^{-1} J_i \right)^{-1}.
+$$
+
+特に，各エージェントのノイズが等方性（すべて$\Sigma_i = \sigma^2 I$とする場合），上式は
+$$
+\operatorname{Cov}(\hat{q}_l) \ge \sigma^2 \left( \sum_i J_i^T J_i \right)^{-1}
+$$
+となり，エージェント数が増えることにより各々の寄与が積み重なり，結果として推定の不確かさが低下する傾向が明確となる．
+より詳細な解析として，解析的なヤコビアン
+$$
+J = \frac{f}{d}\,P_\beta, \quad P_\beta = I - \beta\,\beta^\top,
+$$
+（ここで$\beta = \frac{q_l-p}{\|q_l-p\|}$はエージェントから観測点$q_l$への単位方向ベクトル，すなわちbearing）を用いて，CRLBを評価することができる．
+
+各エージェントについて，対象$q_l$の投影に関する解析的なヤコビアンは
+$$
+J_i = \frac{f}{d_i}\,P_{\beta_i}, \quad d_i = \|q_l-p_i\|, \quad P_{\beta_i} = I - \beta_i\,\beta_i^\top,
+$$
+と記述できる．ここで
+- $f$は焦点距離，
+- $d_i$は対象とエージェント$i$との距離，
+- $\beta_i = \frac{q_l-p_i}{d_i}$はエージェント$i$におけるbearing，
+- $P_{\beta_i}$は$\beta_i$に沿った成分を取り除く射影行列（すなわち，画像面上の変化にのみ寄与する部分）である．
+
+同様に，エージェント$j$についても
+$$
+J_j = \frac{f}{d_j}\,P_{\beta_j}, \quad d_j = \|q_l-p_j\|, \quad \beta_j = \frac{q_l-p_j}{d_j}.
+$$
+
+それぞれのエージェントからのフィッシャー情報行列は
+$$
+I_i = J_i^\top J_i, \quad I_j = J_j^\top J_j,
+$$
+となる．ここで，射影行列$P_\beta$は対称かつ冪等（$P_\beta^2 = P_\beta$）なので，
+$$
+J_i^\top J_i = \left(\frac{f}{d_i}P_{\beta_i}\right)^\top \left(\frac{f}{d_i}P_{\beta_i}\right) = \frac{f^2}{d_i^2}\,P_{\beta_i}^\top P_{\beta_i} = \frac{f^2}{d_i^2}\,P_{\beta_i}.
+$$
+同様に，
+$$
+J_j^\top J_j = \frac{f^2}{d_j^2}\,P_{\beta_j}.
+$$
+
+したがって，2台のカメラからの合成情報は
+$$
+I_{\text{total}} = J_i^\top J_i + J_j^\top J_j = \frac{f^2}{d_i^2}\,P_{\beta_i} + \frac{f^2}{d_j^2}\,P_{\beta_j}.
+$$
+
+CRLBにより，無偏推定量$\hat{q}_l$の共分散行列は
+$$
+\operatorname{Cov}(q_l) \ge \sigma^2\,\frac{1}{f^2}\,\left[\frac{P_{\beta_i}}{d_i^2} + \frac{P_{\beta_j}}{d_j^2}\right]^{-1}.
+$$
+ここから，新しい自己位置推定のための確率関数を
+$$
+\begin{align}
+\phi_{ij}^l &= E_{ij}^{l} =  \exp(-\frac{\sigma^2}{f^2}\,\mathrm{tr}\left[ \frac{P_{\beta_i}}{d_i^2} + \frac{P_{\beta_j}}{d_j^2}\right]^{-1})
+\end{align}
+$$
+のように設計できる．
+
+### 確率関数の時間微分
+
+上記で設計した確率関数を制御に利用するためには，その時間微分を計算する必要がある．ここでは，確率関数の時間微分を段階的に導出する．
+$$
+M \triangleq \frac{P_{\beta_i}}{d_i^2}+\frac{P_{\beta_j}}{d_j^2}
+$$
+とおき，$M^{-1}$のトレースを $T$ と書くと
+$$
+T = \operatorname{tr}(M^{-1})
+$$
+となり，提案した関数はより簡潔に
+$$
+{E}_{ij}^e = \exp\Bigl(-\frac{\sigma^2}{f^2}\,T\Bigr)
+$$
+と表せる．$T = \operatorname{tr}(M^{-1})$ として，チェーンルールを適用すると
+$$
+\dot{{E}}_{ij}^l = -\frac{\sigma^2}{f^2}\,{P}_{ij}^l\,\dot{T}
+$$
+ここで
+$$
+\dot{T} = \frac{d}{dt}\operatorname{tr}(M^{-1}) =\operatorname{tr}\Bigl(\frac{d}{dt}(M^{-1})\Bigr) =-\operatorname{tr}\Bigl(M^{-1}\,\dot{M}\,M^{-1}\Bigr)
+$$
+これを上記の式に代入すると、
+$$
+\dot{{E}}_{ij}^l = -\frac{\sigma^2}{f^2}\,{E}_{ij}^l\,\Bigl[-\operatorname{tr}(M^{-1}\,\dot{M}\,M^{-1})\Bigr] =\frac{\sigma^2}{f^2}\,{E}_{ij}^l\,\operatorname{tr}(M^{-1}\,\dot{M}\,M^{-1})
+$$
+よって、
+$$
+\dot{E}_{ij}^l = \frac{\sigma^2}{f^2}\,{E}_{ij}^l\,\operatorname{tr}\Bigl(M^{-1}\,\dot{M}\,M^{-1}\Bigr)
+$$
+ここで、$M$ は各エージェント $i,j$ について
+$$
+M = \frac{P_{\beta_i}}{d_i^2} + \frac{P_{\beta_j}}{d_j^2}
+$$
+と定義されている。各項に対して微分を行う。一般に、スカラー関数 $d$ と行列 $P_\beta$ の組合せの微分は、
+$$
+\frac{d}{dt}\left(\frac{P_\beta}{d^2}\right) =\frac{1}{d^2}\dot{P}_\beta - \frac{2\dot{d}}{d^3}\,P_\beta
+$$
+ここで
+$$
+\dot{P}_\beta = \frac{P_\beta\,Rv}{d}\,\beta^\top + \beta\,\frac{R^\top v^\top\,P_\beta}{d}
+$$
+より、各エージェント $i$ について
+$$
+\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{1}{d_i^2}\left(\frac{P_{\beta_i}\,R_iv_i}{d_i}\,\beta_i^\top + \beta_i\,\frac{R_i^\top v_i^\top\,P_{\beta_i}}{d_i}\right) -\frac{2(-\beta_i^\top R_i v_i)}{d_i^3}\,P_{\beta_i}
+$$
+すなわち、
+$$
+\frac{d}{dt}\left(\frac{P_{\beta_i}}{d_i^2}\right) =\frac{P_{\beta_i}\,R_iv_i\,\beta_i^\top + \beta_i\,R_i^\top v_i^\top\,P_{\beta_i}}{d_i^3} +\frac{2(\beta_i^\top R_iv_i)}{d_i^3}\,P_{\beta_i}
+$$
+ゆえに、
+$$
+\dot{M} = \frac{P_{\beta_i}\,R_iv_i\,\beta_i^\top + \beta_i\,R_i^\top v_i^\top\,P_{\beta_i} + 2(\beta_i^\top R_iv_i)\,P_{\beta_i}}{d_i^3} +\frac{P_{\beta_j}\,R_jv_j\,\beta_j^\top + \beta_j\,R_j^\top v_j^\top\,P_{\beta_j} + 2(\beta_j^\top R_jv_j)\,P_{\beta_j}}{d_j^3}
+$$
+以上をまとめると、スカラー化した確率関数
+$$
+{E}_{ij}^l = \exp\Biggl(-\frac{\sigma^2}{f^2}\,\operatorname{tr}\Bigl\{M^{-1}\Bigr\}\Biggr)
+$$
+（ただし $M = \frac{P_{\beta_i}}{d_i^2}+\frac{P_{\beta_j}}{d_j^2}$）の時間微分は、
+$$
+\dot{{E}}_{ij}^l = \frac{\sigma^2}{f^2}\,{E}_{ij}^l\,\operatorname{tr}\Bigl(M^{-1}\,\dot{M}\,M^{-1}\Bigr)
+$$
+であり、ここで $\dot{M}$ は上記の通り各エージェントの項の和として求まる。
+### 制御入力に関する線形化
+
+確率関数をCBFに適用するには，確率関数の時間微分を制御入力$v_i, v_j$についての線形な関数に変換する必要がある．ここで
+$$
+\begin{aligned}
+\dot E_{ij}^l
+&= -\frac{\sigma^2}{f^2}\,E_{ij}^l\,\dot T,\\
+\dot T
+&= \mathrm{tr}\left((M^{-1})^{\cdot}\right)
+= -\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right).
+\end{aligned}
+$$
+
+ただし$M$は各エージェント $k\in\{i,j\}$ の速度を $w_k=R_k v_k$ とし
+$$
+\begin{aligned}
+\dot M
+&=\sum_{k\in\{i,j\}}
+\frac{\mathrm d}{\mathrm dt}\left(\tfrac{P_{\beta_k}}{d_k^2}\right)\\
+&=\sum_{k}
+\frac{1}{d_k^2}\dot P_{\beta_k}
+-\frac{2\dot d_k}{d_k^3}P_{\beta_k}\\
+&=\sum_{k}
+\frac{1}{d_k^3}\left[
+P_{\beta_k}w_k\beta_k^\top
++\beta_k w_k^\top P_{\beta_k}
++2(\beta_k^\top w_k)P_{\beta_k}
+\right].
+\end{aligned}
+$$
+のように時間微分を計算することができる．
+
+また，トレース演算は以下
+$$
+\begin{aligned}
+&\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right)\\
+&=\sum_{k\in\{i,j\}}
+\frac{1}{d_k^3}\left[
+\underbrace{\mathrm{tr}(M^{-1}P_{\beta_k}w_k\beta_k^\top M^{-1})}_{t_{k,1}}
++\underbrace{\mathrm{tr}(M^{-1}\beta_k w_k^\top P_{\beta_k}M^{-1})}_{t_{k,2}}
++\underbrace{2(\beta_k^\top w_k)\mathrm{tr}(M^{-1}P_{\beta_k}M^{-1})}_{t_{k,3}}
+\right].
+\end{aligned}
+$$
+のように分解できる．ただし各項は
+$\mathrm{tr}(A\,x\,y^\top\,B)=y^\top B A x$
+により
+$$
+\begin{aligned}
+t_{k,1}&=w_k^\top P_{\beta_k}M^{-2}\beta_k,\\
+t_{k,2}&=w_k^\top P_{\beta_k}M^{-2}\beta_k,\\
+t_{k,3}&=2(\beta_k^\top w_k)\,\chi_k,\quad
+\chi_k=\mathrm{tr}(M^{-1}P_{\beta_k}M^{-1}).
+\end{aligned}
+$$
+を得る。よって
+$$
+\begin{aligned}
+\mathrm{tr}\left(M^{-1}\dot M\,M^{-1}\right)
+&=\sum_{k}
+\frac{2}{d_k^3}
+w_k^\top\left(P_{\beta_k}M^{-2}\beta_k + \chi_k\beta_k\right).
+\end{aligned}
+$$
+
+上記の変形により，
+$w_k=R_k v_k$ を組み合わせ，
+$$
+\begin{aligned}
+\dot E_{ij}^l
+&=-\frac{\sigma^2}{f^2}E_{ij}^l\left(-\mathrm{tr}(M^{-1}\dot M\,M^{-1})\right)\\
+&=\sum_{k\in\{i,j\}}
+\lambda_k^\top v_k,
+\end{aligned}
+$$
+$$
+\lambda_k
+:=-\frac{2\sigma^2}{f^2}\,
+\frac{P_{ij}^l}{d_k^3}\,
+R_k^\top\left(P_{\beta_k}M^{-2}\beta_k + \chi_k\beta_k\right).
+$$
+最終的に
+$$
+\begin{aligned}
+\dot E_{ij}^l
+= \lambda_i^\top v_i + \lambda_j^\top v_j
+\end{aligned}
+$$
+が得られる。上述したFoV内に特徴点を保持するためのCBF制約に加えて，CRLBに関するCBF制約を追加するとQPは以下の様に修正できる．
+$$
+\begin{align}
+ \min_{\xi_i, \xi_j}\:\sum_{i,j}(p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})^\top Q_1 & (p^d_{i}-p_{i,{k+1}}-hR_{i,k}v_{i,k})
++ 
+\begin{bmatrix}
+\omega_{i,k}\\v_{i,k}
+\end{bmatrix}^\top Q_2
+\begin{bmatrix}
+\omega_{i,k}\\v_{i,k}
+\end{bmatrix}\\
+\mathrm{s.t.}
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-P_{ij}^k))P_j^l \langle \mathrm{grad}_\xi\:P_i^l,\xi_i\rangle&+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-P_{ij}^k))P_i^l \langle \mathrm{grad}_\xi\:P_j^l, \xi_j\rangle\\
+&> -\gamma_0 (1-q_{fov}-\prod_{l\in\mathcal{L}}(1-P_{ij}^k))\\
+\sum_{l\in \mathcal{L}\subset\mathcal{C}_i \cap \mathcal{C}_j}(\prod_{k\neq l}(1-E_{ij}^k))(\langle \mathrm{grad}_{p_i} E_{ij}^l, v_i\rangle&+\langle \mathrm{grad}_{p_j} E_{ij}^l, v_j\rangle)> -\gamma_1 (1-q_{est}-\prod_{l\in\mathcal{L}}(1-E_{ij}^k))
+\end{align}
+$$
+ただし
+$$
+\begin{align}
+\mathrm{grad}_{p_i} E_{ij}^l &= -\frac{2\sigma^2}{f^2}\,
+\frac{E_{ij}^l}{d_{l}^3}\,
+R_k^\top\left(P_{\beta_l}M^{-2}\beta_l + \mathrm{tr}(M^{-1}P_{\beta_k}M^{-1})\beta_l\right)\\
+M &= \frac{P_{\beta_i}}{d_i^2} + \frac{P_{\beta_j}}{d_j^2}
+\end{align}
+$$

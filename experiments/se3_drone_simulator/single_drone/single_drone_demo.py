@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
+from scipy.spatial.transform import Rotation
 
 # 親ディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -74,10 +75,14 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         # # 初期位置（ドローンの初期位置付近）
         # start_point = np.array([0.0, -5.0, 0.0])
         # # 目標位置（特徴点の中心付近）
+        # # end_point = np.array([0.0, -3.0, 0.0])
+        # start_point = np.array([-5.0, -5.0, 0.0])
+        # # 目標位置（特徴点の中心付近）
+        # end_point = np.array([5.0, -5.0, 0.0])
         # end_point = np.array([0.0, -3.0, 0.0])
-        start_point = np.array([-5.0, -5.0, 0.0])
+        start_point = np.array([-0.1, -5.0, 0.0])
         # 目標位置（特徴点の中心付近）
-        end_point = np.array([5.0, -5.0, 0.0])
+        end_point = np.array([0.1, -5.0, 0.0])
         
         # 進行方向ベクトル
         direction = end_point - start_point
@@ -95,7 +100,7 @@ def generate_target_trajectory(trajectory_type='circle', center=np.array([0.0, 0
         
         # 進行方向に垂直な方向に周波数成分（サイン波）を追加
         # amplitude = 3.0  # 振幅
-        amplitude = 0.1
+        amplitude = 0.0
         frequency = 2.0  # 周波数
         
         # サイン波の周波数成分
@@ -189,7 +194,7 @@ def main():
         # 最も中心に近い特徴点を選択
         # closest_feature_idx = np.argmin([np.linalg.norm(fp.position - feature_area_center) for fp in feature_points])
         # feature_points = [feature_points[closest_feature_idx]]
-        feature_points = [FeaturePoint(position=np.array([0.0, 3.0, 0.0]))]
+        feature_points = [FeaturePoint(position=np.array([-0.1, 1.0, 0.0]))]
         print(f"単一特徴点モード: 特徴点位置 = {feature_points[0].position}")
     
     # 重力加速度を設定
@@ -214,10 +219,15 @@ def main():
     # 動力学モデルに応じてドローンを初期化
     if args.dynamics_model == 'dynamics' or args.dynamics_model == 'holonomic_dynamics':
         camera_direction = np.array([0, 1, 0])
-        # ドローンの初期位置を軌道の始点に合わせる
-        T = SE3(R=np.eye(3), p=target_position)
+        # euler = np.array([0, 0, -np.pi/8])
+        euler = np.array([0, 0, 0])
+        drone1_rot = Rotation.from_euler('xyz', euler).as_matrix()
+        T = SE3(R=drone1_rot, p=target_position)
         drone = DynamicDrone(fov_angle=np.pi/8, T=T, camera_direction=camera_direction, dynamics_model=args.dynamics_model)
         print("2次系モデル（動力学モデル）を使用します")
+        # for debug
+        drone.v = np.array([5.0, 5.0, 0.0])
+        # drone.omega = np.array([0.0, 0.0, 1.0])
     else:
         drone = Drone(fov_angle=np.pi/8)
         print("1次系モデル（運動学モデル）を使用します")
